@@ -1,0 +1,245 @@
+{
+  "id": "3b543235-9577-41ee-85b7-62bb2d2c14de",
+  "revision": 0,
+  "last_node_id": 15,
+  "last_link_id": 39,
+  "nodes": [
+    {
+      "id": 2,
+      "type": "LoadImage",
+      "pos": [
+        -458.48047927751173,
+        5278.548262855836
+      ],
+      "size": [
+        270,
+        314
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            37
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.28.0"
+      },
+      "widgets_values": [
+        "u=2774630307,4198613233&fm=253&fmt=auto&app=138&f=JPEG.webp",
+        "image"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "LoadImage",
+      "pos": [
+        -458.6427756093393,
+        5646.369359993535
+      ],
+      "size": [
+        270,
+        314
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            38
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.28.0"
+      },
+      "widgets_values": [
+        "622762d0f703918fea765e922a81358658eec414.jpg",
+        "image"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "PreviewAny",
+      "pos": [
+        399.19707412584904,
+        5265.408166854893
+      ],
+      "size": [
+        507.777492873544,
+        615.5417824286742
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 39
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewAny",
+        "cnr_id": "comfy-core",
+        "ver": "0.28.0"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 15,
+      "type": "QwenH3PromptLocal",
+      "pos": [
+        -63.023852258143435,
+        5418.550500160368
+      ],
+      "size": [
+        400,
+        412
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "reference_image_0",
+          "name": "reference_images.reference_image_0",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 37
+        },
+        {
+          "label": "reference_image_1",
+          "name": "reference_images.reference_image_1",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 38
+        },
+        {
+          "label": "reference_image_2",
+          "name": "reference_images.reference_image_2",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "label": "reference_video_0",
+          "name": "reference_videos.reference_video_0",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "h3_prompt",
+          "type": "STRING",
+          "links": [
+            39
+          ]
+        },
+        {
+          "name": "selected_skill",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "detected_mode",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "QwenH3PromptLocal"
+      },
+      "widgets_values": [
+        "Create a product promotional video for the product shown in picture 1, using the character depicted in picture 2.",
+        "auto",
+        10,
+        "Qwen3.8-27B-Q4_K_M.gguf",
+        "mmproj-F16.gguf",
+        false,
+        "medium",
+        285617078592094,
+        "randomize",
+        8192,
+        2,
+        true
+      ]
+    }
+  ],
+  "links": [
+    [
+      37,
+      2,
+      0,
+      15,
+      0,
+      "IMAGE"
+    ],
+    [
+      38,
+      8,
+      0,
+      15,
+      1,
+      "IMAGE"
+    ],
+    [
+      39,
+      15,
+      0,
+      3,
+      0,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.9445860954130294,
+      "offset": [
+        734.0375988660427,
+        -4884.1673805788605
+      ]
+    },
+    "frontendVersion": "1.48.7",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

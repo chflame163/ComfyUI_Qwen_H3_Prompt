@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.idea/
+.pytest_cache/
+.ruff_cache/
+*.log
+*.tmp
+*.gguf
+bin/
+runtime/
+runtime_config.json
