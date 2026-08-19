@@ -87,8 +87,14 @@ python install_runtime.py --backend cuda --build-from-source
 - Git、CMake、C 编译器和 C++ 编译器，例如 Ubuntu/Debian 的 `git cmake build-essential`。
 
 ## 模型目录
-从 https://huggingface.co/unsloth/Qwen3.8-27B-GGUF 下载 ```Qwen3.8-27B-Q4_K_M.gguf``` 和 ```mmproj-F16.gguf```, 并放入 
-```ComfyUI/models/LLM/Qwen3.8/```
+把 Qwen3.8 视觉模型权和GGUF权重文件放到```ComfyUI/models/LLM/Qwen3.8/```目录。
+* 视觉权重：
+  从 https://huggingface.co/unsloth/Qwen3.8-27B-GGUF 下载 ```mmproj-F16.gguf```
+* GGUF权重：   
+  对于20G以上显存的设备，推荐从 https://huggingface.co/unsloth/Qwen3.8-27B-GGUF 下载 ```Qwen3.8-27B-Q4_K_M.gguf``` 或者 ```Qwen3.8-27B-Q6_K.gguf```。    
+  对于16G显存的设备，推荐 https://huggingface.co/soyaakinohara/qwen3.8-27b-abliterated-3.69bpw-12GB-MTP.gguf 。    
+  也可以自行下载其他与llama-server兼容的Qwen3.8权重。
+
 
 ## 节点
 启动ComfyUI，在 `😺dzNodes/QWen_H3_Prompt` 分类中添加 `Qwen H3 Prompt (Local)`节点。
