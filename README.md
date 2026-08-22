@@ -11,6 +11,21 @@
 
 节点不会输出澄清问题、确认请求、备选方案、pre-production package 或下一步建议。用户未提供的可选内容会直接省略，例如画面文案、口号、品牌声明、对白、旁白和歌词；生成视频不可缺少但未指定的纯创意细节，则根据请求与参考媒体采用一个保守的确定值。
 
+## 安装节点
+使用ComfyUI Manager安装， 或使用以下命令手动安装:
+```commandline
+cd ComfyUI/custom_nodes/
+git clone https://github.com/chflame163/ComfyUI_Qwen_H3_Prompt.git
+```
+
+## 模型目录
+把 Qwen3.8 视觉模型和GGUF权重文件放到```ComfyUI/models/LLM/Qwen3.8/```目录。
+* 视觉权重：
+  从 https://huggingface.co/unsloth/Qwen3.8-27B-GGUF 下载 ```mmproj-F16.gguf```
+* GGUF权重：   
+  对于20G以上显存的设备，推荐从 https://huggingface.co/unsloth/Qwen3.8-27B-GGUF 下载 ```Qwen3.8-27B-Q4_K_M.gguf```。    
+  对于16G显存的设备，推荐 https://huggingface.co/soyaakinohara/qwen3.8-27b-abliterated-3.69bpw-12GB-MTP.gguf 。    
+  也可以自行下载其他与llama-server兼容的Qwen3.8权重。
 
 ## 安装llama-server runtime
 
@@ -86,14 +101,6 @@ python install_runtime.py --backend cuda --build-from-source
 - 包含 `nvcc` 的 NVIDIA CUDA Toolkit，`nvcc` 位于 `PATH` 中或已经设置 `CUDA_HOME`；
 - Git、CMake、C 编译器和 C++ 编译器，例如 Ubuntu/Debian 的 `git cmake build-essential`。
 
-## 模型目录
-把 Qwen3.8 视觉模型和GGUF权重文件放到```ComfyUI/models/LLM/Qwen3.8/```目录。
-* 视觉权重：
-  从 https://huggingface.co/unsloth/Qwen3.8-27B-GGUF 下载 ```mmproj-F16.gguf```
-* GGUF权重：   
-  对于20G以上显存的设备，推荐从 https://huggingface.co/unsloth/Qwen3.8-27B-GGUF 下载 ```Qwen3.8-27B-Q4_K_M.gguf```。    
-  对于16G显存的设备，推荐 https://huggingface.co/soyaakinohara/qwen3.8-27b-abliterated-3.69bpw-12GB-MTP.gguf 。    
-  也可以自行下载其他与llama-server兼容的Qwen3.8权重。
 
 
 ## 节点
