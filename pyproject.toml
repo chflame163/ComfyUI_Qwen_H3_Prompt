@@ -1,0 +1,14 @@
+[project]
+name = "qwen-h3-prompt"
+version = "0.1.0"
+description = "Generate MiniMax H3 prompts locally with Qwen models in ComfyUI."
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/chflame163/ComfyUI_Qwen_H3_Prompt"
+
+[tool.comfy]
+PublisherId = "chflame163"
+DisplayName = "Qwen H3 Prompt"
