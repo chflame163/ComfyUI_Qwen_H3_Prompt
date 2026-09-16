@@ -22,7 +22,6 @@ from .runtime import LlamaServerManager
 from .skills import (
     SKILL_NAMES,
     detect_h3_mode,
-    explicitly_requests_silence,
     mode_router_prompt,
     output_issues,
     parse_mode_selection,
@@ -235,7 +234,7 @@ class QwenH3Prompt(io.ComfyNode):
             node_id="QwenH3PromptLocal",
             display_name="Qwen H3 Prompt (Local)",
             category="😺dzNodes/Qwen_H3_Prompt",
-            description="Runs a local llama.cpp server with Qwen3.8 and one of the nine official MiniMax H3 Skills.",
+            description="Runs a local llama.cpp server with Qwen3.8 and a discovered H3 Skill from the bundled or custom Skill directories.",
             inputs=[
                 io.String.Input(
                     "prompt",
@@ -247,7 +246,7 @@ class QwenH3Prompt(io.ComfyNode):
                     "skill",
                     options=["auto", *SKILL_NAMES],
                     default="auto",
-                    tooltip="Auto routes the request, or choose one of the nine official MiniMax H3 Skills directly.",
+                    tooltip="Auto routes across bundled and custom Skills, or choose one directly.",
                 ),
                 io.Float.Input(
                     "duration",
@@ -389,7 +388,6 @@ class QwenH3Prompt(io.ComfyNode):
                 video_sample_frames_per_sec,
             )
             mode = detect_h3_mode(len(images), len(videos))
-            complete_silence = explicitly_requests_silence(prompt)
             model = _resolve_model(llm_model)
             projector = _resolve_model(vision_model)
             settings = _sampling_settings(think_mode)
@@ -404,11 +402,10 @@ class QwenH3Prompt(io.ComfyNode):
                 settings["repetition_penalty"],
             )
             LOGGER.info(
-                "[Qwen H3] Multimodal input parsed | images=%d | videos=%d | initial_mode=%s | complete_silence=%s | elapsed %.2f s",
+                "[Qwen H3] Multimodal input parsed | images=%d | videos=%d | initial_mode=%s | elapsed %.2f s",
                 len(images),
                 len(videos),
                 mode or "automatic",
-                complete_silence,
                 time.perf_counter() - stage_started,
             )
 
@@ -543,12 +540,11 @@ class QwenH3Prompt(io.ComfyNode):
                     time.perf_counter() - stage_started,
                 )
 
-                LOGGER.info("[Qwen H3] Validating final H3 prompt")
+                LOGGER.info("[Qwen H3] Validating node output")
                 issues = output_issues(
                     result,
                     mode,
                     duration,
-                    require_complete_silence=complete_silence,
                 )
                 if issues:
                     LOGGER.warning(
@@ -563,10 +559,9 @@ class QwenH3Prompt(io.ComfyNode):
                         {
                             "role": "user",
                             "content": (
-                                "Repair the output. Return exactly one complete final H3 video prompt only. "
-                                "Remove every preface, workflow description, question, clarification, confirmation, "
-                                "approval gate, option list, and next-step request. Omit unsupported optional elements "
-                                "instead of asking about them. Problems: " + "; ".join(issues)
+                                "Repair the output and return the complete requested content only. "
+                                "Do not add a wrapper or impose an output schema that the selected Skill does not "
+                                "request. Problems: " + "; ".join(issues)
                             ),
                         },
                     ]
@@ -587,14 +582,13 @@ class QwenH3Prompt(io.ComfyNode):
                         result,
                         mode,
                         duration,
-                        require_complete_silence=complete_silence,
                     )
                     if remaining:
                         raise RuntimeError(
-                            "Qwen output still violates the final H3 prompt contract: "
+                            "Qwen output still fails the basic output contract: "
                             + "; ".join(remaining)
                         )
-                LOGGER.info("[Qwen H3] Final H3 prompt validation passed")
+                LOGGER.info("[Qwen H3] Node output validation passed")
 
                 content = None
                 messages = None

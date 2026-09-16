@@ -1,15 +1,17 @@
 # ComfyUI Qwen H3 Prompt
 
-在 ComfyUI 内使用本地 Qwen3.8-27B 和 MiniMax-H3 官方 Skill 生成 H3 提示词与制作方案。    
+在 ComfyUI 内使用本地 Qwen3.8-27B 和内置或自定义 H3 Skill 生成 H3 提示词与制作方案。
 节点在 ComfyUI 内启动独立的本地 `llama-server`，推理过程不访问网络。运行完成后结束外部进程，释放GPU显存和系统内存（`force unload model`开启时），不占用ComfyUI内部资源。
+
+节点加载时 `skills/` 和 `custom_skills/` 目录自动扫描并加载 Skill。新增或修改用户 Skill 后需要重启 ComfyUI（或重新加载节点）。
 
 ## 官方 Skill 的本地适配边界
 
-`h3-prompt-writing` 官方声明可直接移植。其余 Skill 原本依赖 MiniMax Hub 的画布、选择卡和媒体生成工具。本节点保留官方 Skill 内容作为创意与领域指导，但统一跳过素材收集、选择卡、审批门槛和媒体生成步骤，只输出符合当前输入模式与时长的最终 H3 prompt。
+`h3-prompt-writing` 官方声明可直接移植。其余 Skill 原本依赖 MiniMax Hub 的画布、选择卡和媒体生成工具。本节点把 Skill 内容作为本地模型指导，Skill 可以输出符合 H3 定义的 prompt，也可以输出自定义的任意文本内容。
 
 与 MiniMax H3 官方 Skills 不同，本节点所使用的 Qwen3.8-27B GGUF 模型不具备分析声音的能力，不能准确提取已有音乐的旋律、BPM、歌词、音色或节拍点。有关声音的提示词只是“创作声音的描述”，不是分析或复刻参考音频。
 
-节点不会输出澄清问题、确认请求、备选方案、pre-production package 或下一步建议。用户未提供的可选内容会直接省略，例如画面文案、口号、品牌声明、对白、旁白和歌词；生成视频不可缺少但未指定的纯创意细节，则根据请求与参考媒体采用一个保守的确定值。
+输出格式和交互行为由所选 Skill 与用户请求决定。节点只执行一次本地推理，不会额外包装、改写或按 H3 结构修复模型输出。
 
 ## 安装节点
 使用ComfyUI Manager安装， 或使用以下命令手动安装:
@@ -45,6 +47,8 @@ python install_runtime.py
 ```
 
 首次启动前必须先执行安装器。安装器会依次完成硬件检测、后端选择、下载、SHA256 校验、安全解压、`llama-server --version` 与 `--list-devices` 验证，最后生成本机专用的 `runtime_config.json`。下载缓存、源码缓存和安装结果都保存在节点的 `runtime/` 目录中。
+
+如果 Windows 报告 `WinError 5` 拒绝访问，先关闭正在运行的 ComfyUI，再使用当前 Windows 用户在节点目录重新执行 `python install_runtime.py --force`。节点启动 llama-server 时会把工作目录设在自定义节点目录，不依赖 runtime 文件夹作为当前目录；这样可以避开旧安装中 runtime 子目录继承的限制性 ACL。
 
 安装器命令：
 
@@ -108,7 +112,7 @@ python install_runtime.py --backend cuda --build-from-source
 ![image](images/QwenH3Prompt_node.jpg)  
 
 节点选项说明：
-- `skill`：`auto` 或9个官方 Skill。设为auto时自动选择Skill路由。
+- `skill`：`auto`、内置 Skill 或 `custom_skills/` 中配置的第三方 Skill。设为auto时会在全部 Skill 中自动选择。
 - `duration`：目标 H3 视频时长，默认 `10.0` 秒，取值范围4~15秒。
 - `think_mode`：布尔开关，默认关闭；自动在 Qwen 官方 instruct 和 thinking 推荐参数之间切换。
 - `reasoning_effort`：仅在 `think_mode` 开启时生效，默认 `medium`。
@@ -117,6 +121,13 @@ python install_runtime.py --backend cuda --build-from-source
 - `reference_videos`：动态添加 0-3 路 IMAGE 批次，内部固定按 24 fps 计算时长和采样时间。
 - `video_sample_frames_per_sec`：每路参考视频每秒抽取的帧数，默认值为 2。
 - `force unload model`：默认开启。开启时每次完成后终止内置 llama-server服务并强制清理内存和显存；关闭时保留模型供下一次运行复用。发生错误时无论选项状态都会强制释放。
+
+### 自定义 Skill
+
+在 `custom_skills/` 下为 Skill 建立独立子目录，并至少放入一个 `SKILL.md`。
+- 通过在 `SKILL.md` 的 YAML front matter 中设置 `name`、`description`、`display-name` 和 `version`，或配置可选的 `meta.yaml`，为 Skill 配置版本、显示名和标签。
+- Skill ID 只能使用小写字母、数字、点、下划线和连字符，不能使用 `auto`，也不能与 MiniMax H3 官方 skills 重名。
+- 节点只把 Markdown 和文本参考文件作为 Qwen 的提示词指导，不会执行第三方 Skill 声明的脚本、工具、网络调用、Canvas 流程或审批卡片。
 
 ### 图片输入与模式路由
 
@@ -151,7 +162,7 @@ Picture 1 是目标视频首帧，Picture 2 是目标视频尾帧，生成从前
 
 ### 参考视频
 
-`reference_videos` 最多连接 3 路，每一路都是按时间顺序排列的 IMAGE batch。每一路按 24 fps 计算后时长不得超过 15 秒；全部参考视频总时长不能超过 15 秒。
+`reference_videos` 最多连接 3 路，每一路都是按时间顺序排列的 IMAGE batch。每一路至少包含 1 帧，按 24 fps 计算后时长不得超过 15 秒；全部参考视频总时长不能超过 15 秒。
 
 `video_sample_frames_per_sec` 表示从每路视频的每一个一秒时间窗中均匀抽取多少帧，它不是整段视频的总抽帧数，也不会改变最终 H3 视频的帧率。
 

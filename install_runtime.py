@@ -655,7 +655,10 @@ def validate_runtime(
         try:
             completed = subprocess.run(
                 [str(executable), argument],
-                cwd=executable.parent,
+                # The extracted runtime directory can inherit restrictive Windows
+                # ACLs. The executable directory remains on PATH, so validation does
+                # not need to use it as the child working directory.
+                cwd=context.root,
                 env=environment,
                 check=False,
                 capture_output=True,

@@ -150,7 +150,10 @@ class LlamaServer:
         self.context_size = context_size
         self.runtime_spec = runtime_spec or load_runtime_spec()
         self.executable = self.runtime_spec.executable
-        self.root = self.executable.parent
+        # Keep the child working directory outside the runtime payload. Some Windows
+        # installs inherit restrictive ACLs on the extracted runtime directory even
+        # when the executable itself is readable.
+        self.root = NODE_ROOT
         self.backend = self.runtime_spec.backend
         self.port = self._free_port()
         self.process: subprocess.Popen | None = None

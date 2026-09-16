@@ -1,33 +1,248 @@
 from __future__ import annotations
 
+import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 SKILL_ROOT = Path(__file__).with_name("skills")
+CUSTOM_SKILL_ROOT = Path(__file__).with_name("custom_skills")
+LOGGER = logging.getLogger("ComfyUI.QwenH3Prompt.skills")
+SKILL_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 
-SKILL_NAMES = (
-    "3d-animation-short-generator",
-    "brand-promo-video-generator",
-    "co-op-game-intro-generator",
-    "h3-prompt-writing",
-    "handdrawn-live-video-generator",
-    "minimalist-product-ad-generator",
-    "music-video-subtitle-generator",
-    "paper-collage-explainer-generator",
-    "papercraft-stop-motion-explainer",
+
+@dataclass(frozen=True)
+class SkillSpec:
+    """A discovered prompt-only Skill available to the local node."""
+
+    id: str
+    path: Path
+    description: str
+    source: str
+    display_name: str | None = None
+    version: str | None = None
+    tags: tuple[str, ...] = ()
+
+
+def _scalar(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _list_values(value: str | tuple[str, ...] | None) -> tuple[str, ...]:
+    if isinstance(value, tuple):
+        return tuple(item for item in value if item.strip())
+    if not isinstance(value, str) or not value.strip():
+        return ()
+    value = value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        value = value[1:-1]
+        return tuple(
+            item
+            for item in (_scalar(part) for part in value.split(","))
+            if item.strip()
+        )
+    return (value,)
+
+
+def _front_matter(path: Path) -> dict[str, str]:
+    """Read the small subset of YAML front matter needed for Skill discovery."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    if not lines or lines[0].strip() != "---":
+        return {}
+
+    end = next(
+        (
+            index
+            for index in range(1, len(lines))
+            if lines[index].strip() == "---"
+            and not lines[index].startswith((" ", "\t"))
+        ),
+        None,
+    )
+    if end is None:
+        return {}
+
+    values: dict[str, str] = {}
+    index = 1
+    while index < end:
+        line = lines[index]
+        match = re.match(
+            r"^(?P<indent>\s*)(?P<key>[A-Za-z0-9_-]+):\s*(?P<value>.*)$",
+            line,
+        )
+        if not match or match.group("indent"):
+            index += 1
+            continue
+
+        key = match.group("key").replace("-", "_").casefold()
+        value = match.group("value").strip()
+        if value.startswith(("|", ">")):
+            block: list[str] = []
+            cursor = index + 1
+            while cursor < end:
+                candidate = lines[cursor]
+                if candidate.strip() and not candidate.startswith((" ", "\t")):
+                    break
+                block.append(candidate)
+                cursor += 1
+            non_empty = [line for line in block if line.strip()]
+            indent = min((len(line) - len(line.lstrip()) for line in non_empty), default=0)
+            block = [line[indent:] if line.strip() else "" for line in block]
+            values[key] = ("\n" if value.startswith("|") else " ").join(block).strip()
+            index = cursor
+            continue
+        if value:
+            values[key] = _scalar(value)
+        index += 1
+    return values
+
+
+def _meta_yaml(path: Path) -> dict[str, str | tuple[str, ...]]:
+    """Read simple scalar and list metadata from the bundled meta.yaml convention."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+
+    values: dict[str, str | tuple[str, ...]] = {}
+    index = 0
+    while index < len(lines):
+        match = re.match(r"^(?P<key>[A-Za-z0-9_-]+):\s*(?P<value>.*)$", lines[index])
+        if not match:
+            index += 1
+            continue
+        key = match.group("key").replace("-", "_").casefold()
+        value = match.group("value").strip()
+        if value:
+            values[key] = _scalar(value)
+            index += 1
+            continue
+
+        items: list[str] = []
+        cursor = index + 1
+        while cursor < len(lines):
+            item = re.match(r"^\s*-\s*(.+?)\s*$", lines[cursor])
+            if not item:
+                break
+            items.append(_scalar(item.group(1)))
+            cursor += 1
+        if items:
+            values[key] = tuple(items)
+        index = cursor
+    return values
+
+
+def _metadata(skill_root: Path) -> tuple[str, str, str | None, str | None, tuple[str, ...]]:
+    front = _front_matter(skill_root / "SKILL.md")
+    meta = _meta_yaml(skill_root / "meta.yaml")
+    skill_id = front.get("name", "").strip() or skill_root.name
+    description = (
+        front.get("description", "").strip()
+        or str(meta.get("summary_en", "")).strip()
+        or str(meta.get("desc_en", "")).strip()
+        or skill_id
+    )
+    description = " ".join(description.split())
+    display_name = (
+        front.get("display_name", "").strip()
+        or front.get("display_name_en", "").strip()
+        or front.get("display_name_zh", "").strip()
+        or str(meta.get("display_name_en", "")).strip()
+        or str(meta.get("display_name_zh", "")).strip()
+        or None
+    )
+    version = (
+        front.get("version", "").strip()
+        or str(meta.get("version", "")).strip()
+        or None
+    )
+    raw_tags: list[str] = []
+    for values in (
+        _list_values(front.get("tags")),
+        _list_values(front.get("tag_en")),
+        _list_values(front.get("tag_cn")),
+        _list_values(meta.get("tags")),
+        _list_values(meta.get("tag_en")),
+        _list_values(meta.get("tag_cn")),
+        _list_values(meta.get("complete_tags_en")),
+        _list_values(meta.get("complete_tags_cn")),
+    ):
+        raw_tags.extend(values)
+    return skill_id, description, display_name, version, tuple(dict.fromkeys(raw_tags))
+
+
+def _discover_skills(root: Path, source: str) -> list[SkillSpec]:
+    if not root.is_dir():
+        return []
+    resolved_root = root.resolve()
+    discovered: list[SkillSpec] = []
+    for candidate in sorted(root.iterdir(), key=lambda item: item.name.casefold()):
+        if not candidate.is_dir():
+            continue
+        skill_path = candidate.resolve()
+        if skill_path.parent != resolved_root:
+            LOGGER.warning("Ignoring Skill outside %s: %s", resolved_root, candidate)
+            continue
+        skill_file = skill_path / "SKILL.md"
+        if not skill_file.is_file() or skill_file.resolve().parent != skill_path:
+            LOGGER.warning("Ignoring Skill without SKILL.md: %s", skill_path)
+            continue
+        skill_id, description, display_name, version, tags = _metadata(skill_path)
+        if not SKILL_ID_RE.fullmatch(skill_id) or skill_id == "auto":
+            LOGGER.warning("Ignoring Skill with invalid id %r: %s", skill_id, skill_path)
+            continue
+        discovered.append(
+            SkillSpec(
+                id=skill_id,
+                path=skill_path,
+                description=description,
+                source=source,
+                display_name=display_name,
+                version=version,
+                tags=tags,
+            )
+        )
+    return discovered
+
+
+def discover_skill_registry(
+    builtin_root: Path | None = None,
+    custom_root: Path | None = None,
+) -> tuple[SkillSpec, ...]:
+    """Discover bundled Skills first, then non-overriding user Skills."""
+    builtin_root = SKILL_ROOT if builtin_root is None else builtin_root
+    custom_root = CUSTOM_SKILL_ROOT if custom_root is None else custom_root
+    registry: list[SkillSpec] = []
+    seen: set[str] = set()
+    candidates = [
+        *_discover_skills(builtin_root, "builtin"),
+        *_discover_skills(custom_root, "custom"),
+    ]
+    for spec in candidates:
+        key = spec.id.casefold()
+        if key in seen:
+            LOGGER.warning("Ignoring duplicate Skill id %r from %s", spec.id, spec.path)
+            continue
+        seen.add(key)
+        registry.append(spec)
+    return tuple(registry)
+
+
+SKILL_REGISTRY = discover_skill_registry()
+SKILL_NAMES = tuple(spec.id for spec in SKILL_REGISTRY)
+SKILL_DESCRIPTIONS = {spec.id: spec.description for spec in SKILL_REGISTRY}
+SKILL_BY_ID = {spec.id.casefold(): spec for spec in SKILL_REGISTRY}
+DEFAULT_SKILL_ID = (
+    "h3-prompt-writing"
+    if "h3-prompt-writing" in SKILL_NAMES
+    else (SKILL_NAMES[0] if SKILL_NAMES else "")
 )
-
-SKILL_DESCRIPTIONS = {
-    "3d-animation-short-generator": "Complete story-first stylized 3D animated shorts with characters, environments, shots, continuity, audio, and review.",
-    "brand-promo-video-generator": "Promotional shorts for brands, products, apps, shops, websites, and launches using verified assets and claims.",
-    "co-op-game-intro-generator": "Two-player co-op game menu or opening animation with player cards, characters, and menu interaction.",
-    "h3-prompt-writing": "Direct MiniMax H3 prompt writing for T2VA, I2VA, FL2VA, L2VA, and Ref2VA.",
-    "handdrawn-live-video-generator": "Surreal live-action scenes blended with rough glowing hand-drawn animation, contact, morphing, and chase motion.",
-    "minimalist-product-ad-generator": "Minimalist premium product advertising shorts for e-commerce and product launches.",
-    "music-video-subtitle-generator": "Music videos and emotional shorts with lyric timing, spatial typography, subtitles, beats, and shot continuity.",
-    "paper-collage-explainer-generator": "Tactile halftone paper-collage explainers for narration, concepts, opinions, and social video.",
-    "papercraft-stop-motion-explainer": "Handmade papercraft, cut-paper, pop-up-book, diorama, and stop-motion educational explainers.",
-}
 
 BASE_FIELDS = (
     "integrated_multimodal_description:",
@@ -126,10 +341,16 @@ def explicitly_requests_silence(user_prompt: str) -> bool:
     return any(pattern.search(user_prompt) for pattern in SILENCE_REQUEST_PATTERNS)
 
 
-def router_prompt(user_prompt: str, mode: str, asset_summary: str) -> list[dict[str, str]]:
-    catalog = "\n".join(f"- {name}: {SKILL_DESCRIPTIONS[name]}" for name in SKILL_NAMES)
+def router_prompt(
+    user_prompt: str,
+    mode: str,
+    asset_summary: str,
+    skills: tuple[SkillSpec, ...] | None = None,
+) -> list[dict[str, str]]:
+    available = skills if skills is not None else SKILL_REGISTRY
+    catalog = "\n".join(f"- {spec.id}: {spec.description}" for spec in available)
     system = (
-        "Select exactly one MiniMax H3 skill for the request. Return only its exact skill id, "
+        "Select exactly one available H3 skill for the request. Return only its exact skill id, "
         "with no punctuation or explanation. Prefer h3-prompt-writing for direct prompt rewriting "
         "when no specialized production workflow clearly applies.\n\n" + catalog
     )
@@ -137,40 +358,90 @@ def router_prompt(user_prompt: str, mode: str, asset_summary: str) -> list[dict[
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
-def parse_skill_selection(text: str) -> str:
+def parse_skill_selection(
+    text: str,
+    skills: tuple[SkillSpec, ...] | None = None,
+) -> str:
+    available = skills if skills is not None else SKILL_REGISTRY
+    by_id = {spec.id.casefold(): spec.id for spec in available}
     normalized = text.strip().lower()
-    if normalized in SKILL_NAMES:
-        return normalized
-    matches = [name for name in SKILL_NAMES if name in normalized]
+    if normalized in by_id:
+        return by_id[normalized]
+    matches = [
+        spec.id
+        for spec in available
+        if re.search(
+            rf"(?<![a-z0-9_.-]){re.escape(spec.id.casefold())}(?![a-z0-9_.-])",
+            normalized,
+        )
+    ]
+    if not matches:
+        matches = [
+            spec.id
+            for spec in available
+            if re.search(
+                rf"(?<![a-z0-9_-]){re.escape(spec.id.casefold())}(?![a-z0-9_-])",
+                normalized,
+            )
+        ]
     if len(matches) == 1:
         return matches[0]
-    return "h3-prompt-writing"
+    fallback = next((spec.id for spec in available if spec.id == DEFAULT_SKILL_ID), None)
+    return fallback or (available[0].id if available else "")
 
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def skill_instructions(skill: str, mode: str, max_chars: int = 72000) -> str:
-    if skill not in SKILL_NAMES:
+def _skill_spec(skill: str) -> SkillSpec:
+    spec = SKILL_BY_ID.get(skill.casefold())
+    if spec is None:
         raise ValueError(f"Unknown skill: {skill}")
-    root = (SKILL_ROOT / skill).resolve()
-    if root.parent != SKILL_ROOT.resolve() or not root.is_dir():
-        raise FileNotFoundError(f"Bundled skill is missing: {skill}")
+    return spec
 
-    parts = [f"# Official MiniMax Skill: {skill}\n\n{_read(root / 'SKILL.md')}"]
+
+def _skill_path(skill: str) -> Path:
+    spec = _skill_spec(skill)
+    root = spec.path.resolve()
+    allowed_roots = (SKILL_ROOT.resolve(), CUSTOM_SKILL_ROOT.resolve())
+    if not any(root.parent == allowed_root for allowed_root in allowed_roots):
+        raise FileNotFoundError(f"Skill path is outside the configured Skill roots: {skill}")
+    skill_file = root / "SKILL.md"
+    if (
+        not root.is_dir()
+        or not skill_file.is_file()
+        or skill_file.resolve().parent != root
+    ):
+        raise FileNotFoundError(f"Skill is missing SKILL.md: {skill}")
+    return root
+
+
+def skill_instructions(skill: str, mode: str, max_chars: int = 72000) -> str:
+    skill = _skill_spec(skill).id
+    root = _skill_path(skill)
+
+    parts = [f"# Selected H3 Skill: {skill}\n\n{_read(root / 'SKILL.md')}"]
     if skill == "h3-prompt-writing":
         guide = "ref-en.txt" if mode == "ref2va" else "base-en.txt"
-        parts.append(f"# Required reference: {guide}\n\n{_read(root / 'references' / guide)}")
+        parts.append(f"# Required H3 reference: {guide}\n\n{_read(root / 'references' / guide)}")
     else:
         used = len(parts[0])
         for path in (
             sorted((root / "references").glob("**/*")) if (root / "references").is_dir() else ()
         ):
-            if not path.is_file() or path.suffix.lower() not in {".md", ".txt"}:
+            resolved_path = path.resolve()
+            if (
+                not path.is_file()
+                or path.suffix.lower() not in {".md", ".txt"}
+                or (
+                    resolved_path.parent != root
+                    and root not in resolved_path.parents
+                )
+            ):
                 continue
-            text = _read(path)
-            addition = f"# Official reference: {path.relative_to(root).as_posix()}\n\n{text}"
+            text = _read(resolved_path)
+            addition = f"# Skill reference: {path.relative_to(root).as_posix()}\n\n{text}"
             if used + len(addition) > max_chars:
                 break
             parts.append(addition)
@@ -179,46 +450,20 @@ def skill_instructions(skill: str, mode: str, max_chars: int = 72000) -> str:
 
 
 def system_prompt(skill: str, mode: str, duration: float) -> str:
+    skill = _skill_spec(skill).id
     instructions = skill_instructions(skill, mode)
-    if skill != "h3-prompt-writing":
-        guide = "ref-en.txt" if mode == "ref2va" else "base-en.txt"
-        instructions += f"\n\n# Required final H3 prompt format: {guide}\n\n" + _read(
-            SKILL_ROOT / "h3-prompt-writing" / "references" / guide
-        )
 
     local_contract = f"""
-# Binding local ComfyUI output contract (overrides conflicting workflow instructions above)
+# Binding local ComfyUI output contract
 
-This node is a single-pass MiniMax H3 video-prompt generator, not an interactive MiniMax Hub workflow.
-Use the selected Skill only as creative and domain guidance, then return exactly one complete final H3 prompt
-in the required H3 format. The detected input mode is {mode.upper()} and the exact target duration is
-{duration:.2f} seconds.
+This node performs one local inference pass using the selected Skill and the detected input mode
+({mode.upper()}, target duration {duration:.2f} seconds).
 
-Never ask the user a question. Never request clarification, confirmation, approval, assets, choices, or a reply.
-Never output an intake form, pre-production package, source summary, option list, confirmation gate, approval gate,
-required-clarifications section, next steps, generation offer, or instructions such as "confirm", "go ahead", or
-"proceed". Ignore every official Skill instruction that says to ask, pause, wait, present a card, obtain approval,
-or continue after confirmation. Do not mention those omitted workflow phases in the answer.
-
-When optional information is absent, silently omit the corresponding optional element. In particular, do not add
-on-screen copy, slogans, logos, brand claims, dialogue, narration, lyrics, or product facts unless the user supplied
-them or they are unambiguously visible in a connected reference. Never invent a factual claim. When an unspecified
-creative detail is necessary to make the video executable, choose one conservative value that is compatible with
-the request and visible references; do not present alternatives or expose the assumption.
-
-Unless the user explicitly requests complete silence, create an original audio design from the user request, visible
-image and sampled-video content, and the exact target duration. Fill `overall_soundscape` with time-compatible ambience
-and physical action sounds. Fill `non_diegetic_music` with a concise instrumental score describing mood, suitable
-instruments, pacing, development, synchronization with major visual beats, and the ending. Do not claim to hear,
-analyze, copy, or preserve audio from a connected video: this node receives video frames without their audio tracks.
-Do not invent vocals, lyrics, spoken words, or narration. Respect an explicit request for no background music by using
-`non_diegetic_music: N/A` while retaining appropriate diegetic sound. If the user explicitly requests complete silence,
-output exactly `overall_soundscape: N/A` and `non_diegetic_music: N/A`, and include no audible events elsewhere.
-
-Return the final prompt only, with no Markdown fences, title, analysis, preface, epilogue, notes, caveats, checklist,
-or follow-up text. Preserve user-provided dialogue, lyrics, and visible text exactly. Treat no dialogue and no
-background music as independent constraints; retain plausible diegetic ambience and action sounds unless the user
-explicitly requests complete silence.
+Follow the selected Skill's output instructions and the user's request. There is no mandatory H3 field order,
+mode-specific prefix, timestamp rule, audio section, language, Markdown style, or response shape. Return the
+requested content as-is, including arbitrary prose, structured text, questions, code, or a fixed test string when
+the selected Skill asks for it. Do not add a wrapper, explanation, or formatting requirement that the selected
+Skill does not request.
 """.strip()
     return instructions + "\n\n" + local_contract
 
@@ -229,61 +474,6 @@ def output_issues(
     duration: float,
     require_complete_silence: bool = False,
 ) -> list[str]:
-    stripped = text.strip()
-    if not stripped:
-        return ["The output is empty"]
-    issues: list[str] = []
-    if "```" in stripped:
-        issues.append("Remove Markdown code fences")
-
-    interaction_scope = re.sub(r"<d>.*?</d>", "", stripped, flags=re.DOTALL)
-    if any(pattern.search(interaction_scope) for pattern in INTERACTIVE_OUTPUT_PATTERNS):
-        issues.append(
-            "Remove all questions, clarifications, confirmations, approval gates, and next-step requests"
-        )
-
-    fields = REF_FIELDS if mode == "ref2va" else BASE_FIELDS
-    positions = [stripped.find(field) for field in fields]
-    missing = [field for field, position in zip(fields, positions, strict=True) if position < 0]
-    if missing:
-        issues.append(f"Missing required fields: {', '.join(missing)}")
-    elif positions != sorted(positions):
-        issues.append("Required fields are not in the official order")
-
-    if mode == "t2va" and not stripped.startswith(BASE_FIELDS[0]):
-        issues.append("T2VA must begin directly with integrated_multimodal_description")
-    if mode == "ref2va" and not stripped.startswith(REF_FIELDS[0]):
-        issues.append("REF2VA must begin directly with subject_definitions")
-
-    if mode == "i2va" and not stripped.startswith(
-        "For the target video, at 0.00 seconds into the target video,"
-    ):
-        issues.append("I2VA must begin with the official first-frame instruction")
-    if mode in {"fl2va", "l2va"} and not stripped.startswith(
-        "How the reference pictures align with the target video"
-    ):
-        issues.append(f"{mode.upper()} must begin with the official alignment instruction")
-
-    if require_complete_silence:
-        soundscape_is_silent = re.search(
-            r"(?m)^overall_soundscape:\s*N/A\s*$", stripped
-        )
-        music_is_silent = re.search(
-            r"(?m)^non_diegetic_music:\s*N/A\s*$", stripped
-        )
-        if not soundscape_is_silent or not music_is_silent:
-            issues.append(
-                "Complete silence was requested: set both overall_soundscape and non_diegetic_music exactly to N/A"
-            )
-
-    previous = -1.0
-    for match in TIMESTAMP_RE.finditer(stripped):
-        timestamp = int(match.group(1)) * 60 + int(match.group(2)) + int(match.group(3)) / 1000
-        if timestamp <= previous:
-            issues.append("Shot timestamps must be strictly increasing")
-            break
-        if timestamp >= duration:
-            issues.append(f"Shot timestamp {timestamp:.3f}s must be earlier than {duration:.2f}s")
-            break
-        previous = timestamp
-    return issues
+    """Return only a basic empty-output diagnostic; content shape is intentionally unrestricted."""
+    del mode, duration, require_complete_silence
+    return ["The output is empty"] if not text.strip() else []
