@@ -1,4 +1,0 @@
-interface:
-  display_name: "Example Custom Skill"
-  short_description: "Return the fixed custom Skill test sentence"
-  default_prompt: "Use $example_custom_skill to verify custom Skill loading."

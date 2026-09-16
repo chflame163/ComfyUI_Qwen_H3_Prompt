@@ -1,15 +1,15 @@
 # ComfyUI Qwen H3 Prompt
 
-在 ComfyUI 内使用本地 Qwen3.8-27B 和内置或自定义 H3 Skill 生成 H3 提示词与制作方案。
+在 ComfyUI 内使用本地 Qwen3.8-27B 驱动 Minimax H3 官方 Skill 或自定义 Skill 生成 H3 提示词与制作方案。
 节点在 ComfyUI 内启动独立的本地 `llama-server`，推理过程不访问网络。运行完成后结束外部进程，释放GPU显存和系统内存（`force unload model`开启时），不占用ComfyUI内部资源。
 
-节点加载时 `skills/` 和 `custom_skills/` 目录自动扫描并加载 Skill。新增或修改用户 Skill 后需要重启 ComfyUI（或重新加载节点）。
+节点加载时扫描 `skills/` 和 `custom_skills/` 目录并加载 Skill。
 
 ## 官方 Skill 的本地适配边界
 
-`h3-prompt-writing` 官方声明可直接移植。其余 Skill 原本依赖 MiniMax Hub 的画布、选择卡和媒体生成工具。本节点把 Skill 内容作为本地模型指导，Skill 可以输出符合 H3 定义的 prompt，也可以输出自定义的任意文本内容。
+`h3-prompt-writing` 官方声明可直接移植。其余 Skill 原本依赖 MiniMax Hub 的画布、选择卡和媒体生成工具。本节点把 Skill 内容作为本地模型指导，Skill 可以输出符合 H3 定义的 prompt。    
 
-与 MiniMax H3 官方 Skills 不同，本节点所使用的 Qwen3.8-27B GGUF 模型不具备分析声音的能力，不能准确提取已有音乐的旋律、BPM、歌词、音色或节拍点。有关声音的提示词只是“创作声音的描述”，不是分析或复刻参考音频。
+与 MiniMax H3 官方 Skills 不同，本节点所使用的 Qwen3.8-27B GGUF 模型不具备分析声音的能力，不能准确提取已有音乐的旋律、BPM、歌词、音色或节拍点。有关声音的提示词只是“创作声音的描述”，不是分析或复刻参考音频。    
 
 输出格式和交互行为由所选 Skill 与用户请求决定。节点只执行一次本地推理，不会额外包装、改写或按 H3 结构修复模型输出。
 
@@ -125,9 +125,8 @@ python install_runtime.py --backend cuda --build-from-source
 ### 自定义 Skill
 
 在 `custom_skills/` 下为 Skill 建立独立子目录，并至少放入一个 `SKILL.md`。
-- 通过在 `SKILL.md` 的 YAML front matter 中设置 `name`、`description`、`display-name` 和 `version`，或配置可选的 `meta.yaml`，为 Skill 配置版本、显示名和标签。
 - Skill ID 只能使用小写字母、数字、点、下划线和连字符，不能使用 `auto`，也不能与 MiniMax H3 官方 skills 重名。
-- 节点只把 Markdown 和文本参考文件作为 Qwen 的提示词指导，不会执行第三方 Skill 声明的脚本、工具、网络调用、Canvas 流程或审批卡片。
+- 节点只把 skill 作为 Qwen 的提示词指导，不会执行第三方 Skill 声明的脚本、工具、网络调用、Canvas 流程或审批卡片。
 
 ### 图片输入与模式路由
 
