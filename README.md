@@ -31,7 +31,7 @@ git clone https://github.com/chflame163/ComfyUI_Qwen_H3_Prompt.git
 
 ## 安装llama-server runtime
 
-项目只提供一个跨平台安装入口 `install_runtime.py`。它仅使用 Python 标准库，自动识别 Windows、Linux 或 macOS、x64/ARM64 架构及显卡，并为当前机器部署固定的 llama.cpp `b10436` runtime，不需要安装额外的 pip 包。
+项目只提供一个跨平台安装入口 `install_runtime.py`。它仅使用 Python 标准库，自动识别 Windows、Linux 或 macOS、x64/ARM64 架构及显卡，并为当前机器部署固定的 llama.cpp `b11115` runtime，不需要安装额外的 pip 包。NVIDIA 设备优先使用 `nvidia-smi` 报告的驱动 CUDA 兼容版本，`nvcc` 版本仅作为备用判断。
 
 Windows ComfyUI 官方便携包在节点目录中执行：
 
@@ -65,7 +65,7 @@ python install_runtime.py --backend vulkan
 # 强制重新安装
 python install_runtime.py --force
 
-# 只使用 runtime/.downloads/b10436 中已经校验的文件
+# 只使用 runtime/.downloads/b11115 中已经校验的文件
 python install_runtime.py --offline
 ```
 
@@ -74,26 +74,35 @@ python install_runtime.py --offline
 
 | 系统和设备 | 自动顺序 |
 | --- | --- |
-| Windows x64 NVIDIA | CUDA 12.4 → Vulkan → CPU |
-| Windows x64 AMD | ROCm 7.14 → Vulkan → CPU |
+| Windows x64 NVIDIA | 兼容 CUDA 13.4 时：CUDA 13.4 → CUDA 12.4 → Vulkan → CPU；否则从 CUDA 12.4 开始 |
+| Windows x64 AMD | ROCm 10.0 → Vulkan → CPU |
 | Windows x64 Intel | SYCL → Vulkan → CPU |
 | Windows x64 未识别 GPU | Vulkan → CPU |
-| Windows ARM64 NVIDIA | CUDA 13.4 preview → CPU |
+| Windows ARM64 NVIDIA | 兼容 CUDA 13.4 时：CUDA 13.4 → CPU；否则 CPU |
 | Windows ARM64 Qualcomm Adreno | OpenCL → CPU |
+| Linux x64 NVIDIA | 兼容 CUDA 13.4 时：CUDA 13.4 → CUDA 12.8 → Vulkan → CPU；否则从兼容版本开始 |
+| Linux x64 AMD | ROCm 10.0 → Vulkan → CPU |
 | Linux x64 Intel | SYCL FP16 → Vulkan → CPU |
-| Linux x64 NVIDIA/AMD/未识别 GPU | Vulkan → CPU |
-| Linux ARM64 | Vulkan → CPU |
+| Linux x64 未识别 GPU | Vulkan → CPU |
+| Linux ARM64 NVIDIA | 兼容 CUDA 13.4 时：CUDA 13.4 → Vulkan → CPU；否则 Vulkan → CPU |
+| Linux ARM64 其他设备 | Vulkan → CPU |
 | macOS Apple Silicon 或 Intel | Metal → CPU |
 
 Windows 可用后端取决于架构，包括 `cuda12`、`cuda13`、`rocm`、`sycl`、`vulkan`、`opencl` 和 `cpu`。
 
-Linux 官方预编译后端包括 `vulkan`、`sycl`、`sycl-fp32`、`openvino` 和 `cpu`，具体选项取决于架构。官方文件是 Ubuntu 构建，其他发行版需要兼容的 glibc/libstdc++。Vulkan、Intel SYCL/OpenVINO 还需要系统中已经存在相应的显卡驱动和运行库。
+Linux 官方预编译后端包括 `cuda12`、`cuda13`、`rocm`、`vulkan`、`sycl`、`sycl-fp32`、`openvino` 和 `cpu`，具体选项取决于架构。官方文件是 Ubuntu 构建，其他发行版需要兼容的 glibc/libstdc++。CUDA、ROCm、Vulkan、Intel SYCL/OpenVINO 还需要系统中已经存在相应的显卡驱动和运行库。
 
 macOS 使用对应架构的官方包。Metal 不需要额外 GPU 计算框架，但 Qwen3.8-27B Q4 和视觉投影器仍需要足够的统一内存。
 
-### Linux CUDA 源码部署
+### Linux CUDA 部署
 
-官方 `b10436` 没有提供 Linux CUDA 压缩包。NVIDIA Linux 用户可显式要求安装器从源码构建：
+官方 `b11115` 提供 Ubuntu x64 CUDA 12.8/13.4 和 Ubuntu ARM64 CUDA 13.4 压缩包，自动模式会根据本机驱动兼容版本选择。也可显式要求自动选择 CUDA 预编译包：
+
+```
+python install_runtime.py --backend cuda
+```
+
+当没有兼容的官方包或需要本机构建时，可显式要求安装器从源码构建：
 
 ```
 python install_runtime.py --backend cuda --build-from-source
@@ -189,6 +198,6 @@ Qwen 会根据用户提示词、目标时长、参考图片以及参考视频的
 ## 上游来源与许可证
 
 - MiniMax H3 Skill 来自 [`MiniMax-AI/MiniMax-H3`](https://github.com/MiniMax-AI/MiniMax-H3) commit `d21241f0a4b3acbb34c97dae47fa417b7065e438`，官方文件保存在 `skills/`。
-- 跨平台runtime安装器固定使用 llama.cpp `b10436`，对应完整 commit `6fed9f6ff7a603b124cb8c5864fca6ea879f9f99`，并对下载文件执行 SHA256 校验。
+- 跨平台runtime安装器固定使用 llama.cpp `b11115`，对应完整 commit `d5f66492e661b63e6c74822c2b72f5146053994e`，并对下载文件执行 SHA256 校验。
 - Linux CUDA 源码构建使用同一固定 tag 和 commit。llama.cpp 的 MIT 许可证保存在 `third_party/llama.cpp-LICENSE`。
 - 本项目仅为学习研究使用，如果作为商业用途，请查阅相关原项目授权协议。

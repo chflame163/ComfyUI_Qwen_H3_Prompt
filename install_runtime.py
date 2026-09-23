@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -19,14 +20,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-
 GREEN = "\033[92m"
 RED = "\033[91m"
 RESET = "\033[0m"
 USER_AGENT = "ComfyUI-Qwen-H3-Prompt-runtime-installer/1.0"
 ROOT = Path(__file__).resolve().parent
-RELEASE_TAG = "b10436"
-RELEASE_COMMIT_FULL = "6fed9f6ff7a603b124cb8c5864fca6ea879f9f99"
+RELEASE_TAG = "b11115"
+RELEASE_COMMIT_FULL = "d5f66492e661b63e6c74822c2b72f5146053994e"
 RELEASE_COMMIT = RELEASE_COMMIT_FULL
 RELEASE_BASE_URL = (
     f"https://github.com/ggml-org/llama.cpp/releases/download/{RELEASE_TAG}"
@@ -52,6 +52,7 @@ class RuntimePackage:
     description: str
     assets: tuple[Asset, ...]
     device_markers: tuple[str, ...]
+    cuda_version: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,14 @@ class HardwareInfo:
     architecture: str
     gpu_names: tuple[str, ...]
     vendors: tuple[str, ...] = ()
+    cuda_driver_version: tuple[int, int] | None = None
+    cuda_toolkit_version: tuple[int, int] | None = None
+
+    @property
+    def cuda_selection_version(self) -> tuple[int, int] | None:
+        # Release archives bundle the CUDA runtime. Driver compatibility is what
+        # determines whether they can run; nvcc is only a fallback signal.
+        return self.cuda_driver_version or self.cuda_toolkit_version
 
 
 @dataclass(frozen=True)
@@ -102,8 +111,8 @@ WINDOWS_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
             description="NVIDIA CUDA 12.4",
             assets=(
                 _asset(
-                    "llama-b10436-bin-win-cuda-12.4-x64.zip",
-                    "063423954c7aec2cafa09b8caee9dfddd111a91ca46cbb59cc0f743334371c32",
+                    "llama-b11115-bin-win-cuda-12.4-x64.zip",
+                    "43be772619fb78a2346f23f14eb2cb0d127b942148189f338d2a3321a0b895c1",
                 ),
                 _asset(
                     "cudart-llama-bin-win-cuda-12.4-x64.zip",
@@ -111,29 +120,31 @@ WINDOWS_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
                 ),
             ),
             device_markers=("CUDA",),
+            cuda_version=(12, 4),
         ),
         "cuda13": RuntimePackage(
             backend="cuda13",
-            description="NVIDIA CUDA 13.3",
+            description="NVIDIA CUDA 13.4",
             assets=(
                 _asset(
-                    "llama-b10436-bin-win-cuda-13.3-x64.zip",
-                    "679428e6c243590bac14a113bd4147401639dee5483097446caa5a5eddf5d3aa",
+                    "llama-b11115-bin-win-cuda-13.4-x64.zip",
+                    "7919d81bbc7989d1961e68b829ce791ebba9fbb2ccea4ed208f062ad98c3a10f",
                 ),
                 _asset(
-                    "cudart-llama-bin-win-cuda-13.3-x64.zip",
-                    "1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e",
+                    "cudart-llama-bin-win-cuda-13.4-x64.zip",
+                    "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668",
                 ),
             ),
             device_markers=("CUDA",),
+            cuda_version=(13, 4),
         ),
         "rocm": RuntimePackage(
             backend="rocm",
-            description="AMD ROCm 7.14",
+            description="AMD ROCm 10.0",
             assets=(
                 _asset(
-                    "llama-b10436-bin-win-rocm-7.14-x64.zip",
-                    "cb06811589b98ccb2ac24fc231644e7e672919d4b8f018cecefe18e45c0dbcfe",
+                    "llama-b11115-bin-win-rocm-10.0-x64.zip",
+                    "8d80e3570c03dcb9033b59e5a41d0d101ba363f3d1b0b7334f7dcd7bbb9d2633",
                 ),
             ),
             device_markers=("ROCM", "HIP"),
@@ -143,8 +154,8 @@ WINDOWS_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
             description="Intel SYCL",
             assets=(
                 _asset(
-                    "llama-b10436-bin-win-sycl-x64.zip",
-                    "b3643b03ac5683ff28565925b10b69a6916cc8d0e0dbe7852b31f36791c8bc16",
+                    "llama-b11115-bin-win-sycl-x64.zip",
+                    "89c2be2d83aec3e850b6502d715fe286ef3cb0de72a8ab4e6597a4efaa3feec8",
                 ),
             ),
             device_markers=("SYCL", "LEVEL-ZERO", "INTEL"),
@@ -154,8 +165,8 @@ WINDOWS_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
             description="Vulkan (NVIDIA, AMD, or Intel)",
             assets=(
                 _asset(
-                    "llama-b10436-bin-win-vulkan-x64.zip",
-                    "8bd3e455285199eaa387098503864d43c471ce2aa0d94aa378e3e8290d3b856f",
+                    "llama-b11115-bin-win-vulkan-x64.zip",
+                    "a9ffe9b9a97a3303f75a7ac56e2da76902981846dfdfa4b54d7fca7b89f2b0fc",
                 ),
             ),
             device_markers=("VULKAN",),
@@ -165,8 +176,8 @@ WINDOWS_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
             description="CPU x64",
             assets=(
                 _asset(
-                    "llama-b10436-bin-win-cpu-x64.zip",
-                    "eebe233f29bd89a6c3c03a1e92c8b97a216a67977f4742aef28005c784b1f02c",
+                    "llama-b11115-bin-win-cpu-x64.zip",
+                    "172305d2fe6e5b4aafeff8c49f9e9857a3ef8be98d00672191f8e47ef4f7b09a",
                 ),
             ),
             device_markers=(),
@@ -175,26 +186,27 @@ WINDOWS_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
     "arm64": {
         "cuda13": RuntimePackage(
             backend="cuda13",
-            description="NVIDIA CUDA 13.4 ARM64 preview",
+            description="NVIDIA CUDA 13.4 ARM64",
             assets=(
                 _asset(
-                    "llama-b10436-bin-win-cuda-13.4-arm64.zip",
-                    "ed0d9a65d7cbf8d2092f40e2c02fe150c939fb55cd5141bfc27955d031988a52",
+                    "llama-b11115-bin-win-cuda-13.4-arm64.zip",
+                    "d7efe5fda801828475565a419cc08957d1a07e6c4ee4fc2f1762a384f279ede9",
                 ),
                 _asset(
                     "cudart-llama-bin-win-cuda-13.4-arm64.zip",
-                    "5a40dc7c5fa3d0a80ceeba4f16f9e8d25d87bcf1399c9233588953c43436c33c",
+                    "642dcde8805b3e3165ca710a5443b3b4044b27d96bd3ee3132473988c9bcb774",
                 ),
             ),
             device_markers=("CUDA",),
+            cuda_version=(13, 4),
         ),
         "opencl": RuntimePackage(
             backend="opencl",
             description="Qualcomm Adreno OpenCL ARM64",
             assets=(
                 _asset(
-                    "llama-b10436-bin-win-opencl-adreno-arm64.zip",
-                    "5d20355caaadce99451e4d6c9d8f26d5846c9eaec4894923a9ebc8eff0f87c79",
+                    "llama-b11115-bin-win-opencl-adreno-arm64.zip",
+                    "9f65466244e623aa35f292fe72119196d5338e9094d53761d2fc86295389178e",
                 ),
             ),
             device_markers=("OPENCL", "ADRENO"),
@@ -204,8 +216,8 @@ WINDOWS_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
             description="CPU ARM64",
             assets=(
                 _asset(
-                    "llama-b10436-bin-win-cpu-arm64.zip",
-                    "ce3caeb8db7ac338fad9f622f6111eaa5736b5a79986295f2cec60aa96bddbad",
+                    "llama-b11115-bin-win-cpu-arm64.zip",
+                    "a2ae3287dc91f9200075a9b8763a58e24c7dfa57606912da2e5a46af651aa73b",
                 ),
             ),
             device_markers=(),
@@ -216,13 +228,56 @@ WINDOWS_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
 
 LINUX_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
     "x64": {
+        "cuda12": RuntimePackage(
+            backend="cuda12",
+            description="NVIDIA CUDA 12.8 x64",
+            assets=(
+                _asset(
+                    "llama-b11115-bin-ubuntu-cuda-12.8-x64.tar.gz",
+                    "b92e77a67b7f8190576dadb0be599dd3c47fe252a742130c0622e5b130c7cdd7",
+                ),
+                _asset(
+                    "cudart-llama-b11115-bin-ubuntu-cuda-12.8-x64.tar.gz",
+                    "9be14e86983b1b761c20cba4c528cddaf0c44283d84cbde63fd03b708917cc8e",
+                ),
+            ),
+            device_markers=("CUDA",),
+            cuda_version=(12, 8),
+        ),
+        "cuda13": RuntimePackage(
+            backend="cuda13",
+            description="NVIDIA CUDA 13.4 x64",
+            assets=(
+                _asset(
+                    "llama-b11115-bin-ubuntu-cuda-13.4-x64.tar.gz",
+                    "94e9c39d423afbb1cf3ebfca51af88e5881f1ab52527e9226de1709ce737ca91",
+                ),
+                _asset(
+                    "cudart-llama-b11115-bin-ubuntu-cuda-13.4-x64.tar.gz",
+                    "2f4147097bfe1635af3514dc75c0d8021990d7ee6db88c812cc28dd69bfa1372",
+                ),
+            ),
+            device_markers=("CUDA",),
+            cuda_version=(13, 4),
+        ),
+        "rocm": RuntimePackage(
+            backend="rocm",
+            description="AMD ROCm 10.0 x64",
+            assets=(
+                _asset(
+                    "llama-b11115-bin-ubuntu-rocm-10.0-x64.tar.gz",
+                    "a659420a9a6055e9e5325d0ca4a89d085c740df99c9c0c2f49d6acca07c7ba8c",
+                ),
+            ),
+            device_markers=("ROCM", "HIP"),
+        ),
         "vulkan": RuntimePackage(
             backend="vulkan",
             description="Vulkan x64 (NVIDIA, AMD, or Intel)",
             assets=(
                 _asset(
-                    "llama-b10436-bin-ubuntu-vulkan-x64.tar.gz",
-                    "ecc51b5052498c9a41abb24d686165013658c12902230461175ac33c0de3090f",
+                    "llama-b11115-bin-ubuntu-vulkan-x64.tar.gz",
+                    "8c410670cee557a2d477f73d4eb5b721f6f957a2b560fde2fada2a50cf73f844",
                 ),
             ),
             device_markers=("VULKAN",),
@@ -232,8 +287,8 @@ LINUX_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
             description="Intel SYCL FP16 x64",
             assets=(
                 _asset(
-                    "llama-b10436-bin-ubuntu-sycl-fp16-x64.tar.gz",
-                    "651191efea06bd0241a24a043802648b71dd62afd503d3ced1b4ea5c307e545a",
+                    "llama-b11115-bin-ubuntu-sycl-fp16-x64.tar.gz",
+                    "4f76fadc477f082fb8c3caee591e270e43d7ca99f24cacf964a4c1c709eed768",
                 ),
             ),
             device_markers=("SYCL", "LEVEL-ZERO", "INTEL"),
@@ -243,19 +298,19 @@ LINUX_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
             description="Intel SYCL FP32 x64",
             assets=(
                 _asset(
-                    "llama-b10436-bin-ubuntu-sycl-fp32-x64.tar.gz",
-                    "908b3fc122a3ff4fd50e2729a30965d4eb7e7720e4e95e16f3891cf072eea73a",
+                    "llama-b11115-bin-ubuntu-sycl-fp32-x64.tar.gz",
+                    "a2648065e995c217a7a66205597e1c39fc601e85dd3e7b89b154d2c92740ceae",
                 ),
             ),
             device_markers=("SYCL", "LEVEL-ZERO", "INTEL"),
         ),
         "openvino": RuntimePackage(
             backend="openvino",
-            description="Intel OpenVINO 2026.2.1 x64",
+            description="Intel OpenVINO 2026.4 x64",
             assets=(
                 _asset(
-                    "llama-b10436-bin-ubuntu-openvino-2026.2.1-x64.tar.gz",
-                    "5fbcd3396f7492e2e4debc438a87b936397ff0fc056cb9165c1dfcb00586380a",
+                    "llama-b11115-bin-ubuntu-openvino-2026.4-x64.tar.gz",
+                    "ede2954e68607db327251e3b155906bcbdb3dc53d831e1cc6e84a59f3f1dffda",
                 ),
             ),
             device_markers=("OPENVINO", "INTEL"),
@@ -265,21 +320,37 @@ LINUX_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
             description="CPU x64",
             assets=(
                 _asset(
-                    "llama-b10436-bin-ubuntu-x64.tar.gz",
-                    "ca375784486e71640f984289461c2a4c46a246c9328c0765af2be09bb00d9539",
+                    "llama-b11115-bin-ubuntu-x64.tar.gz",
+                    "16696b08b6e757e91ffc0fbb9fa77084a1152bf77883fd6a294a416200ad9beb",
                 ),
             ),
             device_markers=(),
         ),
     },
     "arm64": {
+        "cuda13": RuntimePackage(
+            backend="cuda13",
+            description="NVIDIA CUDA 13.4 ARM64",
+            assets=(
+                _asset(
+                    "llama-b11115-bin-ubuntu-cuda-13.4-arm64.tar.gz",
+                    "2a26c623099c29ad022eff90cff4593cbbab5cbfc5e32c4616f19e45d0f29c59",
+                ),
+                _asset(
+                    "cudart-llama-b11115-bin-ubuntu-cuda-13.4-arm64.tar.gz",
+                    "1edc7ed43607ba2aeb7c7c56f4d929a96d484ebbe6fa8318de23d46dc19ec50d",
+                ),
+            ),
+            device_markers=("CUDA",),
+            cuda_version=(13, 4),
+        ),
         "vulkan": RuntimePackage(
             backend="vulkan",
             description="Vulkan ARM64",
             assets=(
                 _asset(
-                    "llama-b10436-bin-ubuntu-vulkan-arm64.tar.gz",
-                    "b7091af7320faccf001c91a77f74c8ab7f2eb9334863f5095d24ca754786aae2",
+                    "llama-b11115-bin-ubuntu-vulkan-arm64.tar.gz",
+                    "59668d9dcb1f67815c898bca95074fa7b32bb7fd409fc4fa5f05346cc8490ab5",
                 ),
             ),
             device_markers=("VULKAN",),
@@ -289,8 +360,8 @@ LINUX_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
             description="CPU ARM64",
             assets=(
                 _asset(
-                    "llama-b10436-bin-ubuntu-arm64.tar.gz",
-                    "960f90e69565be7ef135bced730340d3e6a30a0f1c7826d687626b0e0e383d0c",
+                    "llama-b11115-bin-ubuntu-arm64.tar.gz",
+                    "d6416d0624c65cd3f644ba809e8e4499918eee4d13063fcaf53d40f63760d245",
                 ),
             ),
             device_markers=(),
@@ -334,13 +405,13 @@ def _macos_packages(
 
 MACOS_PACKAGES: dict[str, dict[str, RuntimePackage]] = {
     "arm64": _macos_packages(
-        "llama-b10436-bin-macos-arm64.tar.gz",
-        "abd65dbfd770bde9ea17acc73521919b69073e0873d4301b8678a88e7c423fcc",
+        "llama-b11115-bin-macos-arm64.tar.gz",
+        "452d944696ccd760b7bf1643837c09f51c981a4a343429746067007c23265b25",
         "ARM64",
     ),
     "x64": _macos_packages(
-        "llama-b10436-bin-macos-x64.tar.gz",
-        "36138386bc4fcc99305309b16228b358ea801731af34e2fb50cd5d93d67cd6c3",
+        "llama-b11115-bin-macos-x64.tar.gz",
+        "0b80f3bd7bea41d39e4402c54ee7f8d28373dbdd9ad162d0562e3fd7e5145eca",
         "x64",
     ),
 }
@@ -803,7 +874,7 @@ def install_package(
 def write_runtime_config(
     context: InstallerContext,
     package: RuntimePackage,
-    hardware_names: tuple[str, ...],
+    hardware: HardwareInfo,
     executable: Path,
     library_dirs: list[Path],
     version_output: str,
@@ -829,7 +900,19 @@ def write_runtime_config(
             "fit_target_mib": 1536,
             "flash_attention": "auto",
         },
-        "detected_gpus": list(hardware_names),
+        "detected_gpus": list(hardware.gpu_names),
+        "detected_cuda": {
+            "driver_compatibility": (
+                format_cuda_version(hardware.cuda_driver_version)
+                if hardware.cuda_driver_version is not None
+                else None
+            ),
+            "toolkit": (
+                format_cuda_version(hardware.cuda_toolkit_version)
+                if hardware.cuda_toolkit_version is not None
+                else None
+            ),
+        },
         "version_output": version_output.strip(),
         "devices_output": devices_output.strip(),
         "installed_at": datetime.now(timezone.utc).isoformat(),
@@ -874,6 +957,57 @@ def normalize_architecture(
     )
 
 
+def parse_cuda_driver_version(output: str) -> tuple[int, int] | None:
+    match = re.search(
+        r"\bCUDA(?:\s+UMD)?\s+Version\s*:\s*(\d+)\.(\d+)",
+        output,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def parse_cuda_toolkit_version(output: str) -> tuple[int, int] | None:
+    for pattern in (
+        r"\brelease\s+(\d+)\.(\d+)",
+        r"\bV(\d+)\.(\d+)(?:\.\d+)?\b",
+    ):
+        match = re.search(pattern, output, flags=re.IGNORECASE)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def format_cuda_version(version: tuple[int, int] | None) -> str:
+    return "unknown" if version is None else f"{version[0]}.{version[1]}"
+
+
+def _find_cuda_compiler_optional() -> Path | None:
+    candidates: list[Path] = []
+    nvcc = shutil.which("nvcc")
+    if nvcc:
+        candidates.append(Path(nvcc))
+    for variable in ("CUDA_HOME", "CUDA_PATH"):
+        root = os.environ.get(variable)
+        if root:
+            candidates.extend(
+                (Path(root) / "bin" / "nvcc", Path(root) / "bin" / "nvcc.exe")
+            )
+    candidates.append(Path("/usr/local/cuda/bin/nvcc"))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
+def detect_cuda_toolkit_version() -> tuple[int, int] | None:
+    compiler = _find_cuda_compiler_optional()
+    if compiler is None:
+        return None
+    return parse_cuda_toolkit_version(run_probe([str(compiler), "--version"]))
+
+
 def detect_windows_hardware(machine: str | None = None) -> HardwareInfo:
     architecture = normalize_architecture(machine, "windows")
     outputs: list[str] = []
@@ -886,6 +1020,7 @@ def detect_windows_hardware(machine: str | None = None) -> HardwareInfo:
     )
     if nvidia:
         outputs.append(nvidia)
+    nvidia_status = run_probe(["nvidia-smi"])
 
     powershell = shutil.which("powershell.exe") or shutil.which("powershell")
     if powershell:
@@ -927,6 +1062,8 @@ def detect_windows_hardware(machine: str | None = None) -> HardwareInfo:
         architecture=architecture,
         gpu_names=tuple(names) or ("No GPU name detected",),
         vendors=tuple(vendors),
+        cuda_driver_version=parse_cuda_driver_version(nvidia_status),
+        cuda_toolkit_version=detect_cuda_toolkit_version(),
     )
 
 
@@ -987,6 +1124,8 @@ def detect_linux_hardware(machine: str | None = None) -> HardwareInfo:
         architecture=architecture,
         gpu_names=tuple(names) or ("No GPU name detected",),
         vendors=tuple(vendors),
+        cuda_driver_version=parse_cuda_driver_version(run_probe(["nvidia-smi"])),
+        cuda_toolkit_version=detect_cuda_toolkit_version(),
     )
 
 
@@ -1029,6 +1168,28 @@ def detect_hardware(platform_name: str) -> HardwareInfo:
     return detectors[platform_name]()
 
 
+def compatible_cuda_backends(
+    packages: dict[str, RuntimePackage],
+    hardware: HardwareInfo,
+) -> list[str]:
+    versioned = sorted(
+        (
+            (package.cuda_version, backend)
+            for backend, package in packages.items()
+            if package.cuda_version is not None
+        ),
+        reverse=True,
+    )
+    if not versioned:
+        return []
+    detected = hardware.cuda_selection_version
+    if detected is None:
+        # Keep the previous best-effort behavior when nvidia-smi and nvcc do not
+        # expose a version. Validation still rejects an unusable runtime.
+        return [versioned[-1][1]]
+    return [backend for required, backend in versioned if required <= detected]
+
+
 def select_windows_backend_candidates(
     hardware: HardwareInfo,
     requested_backend: str = "auto",
@@ -1036,6 +1197,15 @@ def select_windows_backend_candidates(
 ) -> list[str]:
     packages = WINDOWS_PACKAGES[hardware.architecture]
     if requested_backend != "auto":
+        if requested_backend == "cuda":
+            cuda_backends = compatible_cuda_backends(packages, hardware)
+            if not cuda_backends:
+                detected = format_cuda_version(hardware.cuda_selection_version)
+                raise RuntimeError(
+                    f"No compatible Windows CUDA archive is available for detected "
+                    f"CUDA {detected} on {hardware.architecture}."
+                )
+            return [cuda_backends[0]]
         if requested_backend not in packages:
             available = ", ".join(packages)
             raise RuntimeError(
@@ -1052,7 +1222,8 @@ def select_windows_backend_candidates(
 
     if hardware.architecture == "x64":
         if "nvidia" in hardware.vendors:
-            add("cuda12")
+            for backend in compatible_cuda_backends(packages, hardware):
+                add(backend)
         if "amd" in hardware.vendors:
             add("rocm")
         if "intel" in hardware.vendors:
@@ -1061,8 +1232,9 @@ def select_windows_backend_candidates(
         add("cpu")
     else:
         if "nvidia" in hardware.vendors:
-            add("cuda13")
-        if "qualcomm" in hardware.vendors or not candidates:
+            for backend in compatible_cuda_backends(packages, hardware):
+                add(backend)
+        if "qualcomm" in hardware.vendors or not hardware.vendors:
             add("opencl")
         add("cpu")
     return candidates if allow_fallback else candidates[:1]
@@ -1077,14 +1249,19 @@ def select_linux_backend_candidates(
     packages = LINUX_PACKAGES[hardware.architecture]
     if requested_backend != "auto":
         if requested_backend == "cuda":
-            if not build_from_source:
+            if build_from_source:
+                return ["cuda"]
+            cuda_backends = compatible_cuda_backends(packages, hardware)
+            if not cuda_backends:
+                detected = format_cuda_version(hardware.cuda_selection_version)
                 raise RuntimeError(
-                    "Backend 'cuda' has no official Linux archive in the pinned release. "
-                    "Use --backend cuda --build-from-source."
+                    f"No compatible Linux CUDA archive is available for detected "
+                    f"CUDA {detected} on {hardware.architecture}. Use "
+                    f"--backend cuda --build-from-source or another backend."
                 )
-            return ["cuda"]
+            return [cuda_backends[0]]
         if requested_backend not in packages:
-            available = "cuda (source build), " + ", ".join(packages)
+            available = "cuda (auto version or source build), " + ", ".join(packages)
             raise RuntimeError(
                 f"Backend '{requested_backend}' is unavailable for Linux "
                 f"{hardware.architecture}. Available: {available}."
@@ -1097,6 +1274,11 @@ def select_linux_backend_candidates(
         if backend in packages and backend not in candidates:
             candidates.append(backend)
 
+    if "nvidia" in hardware.vendors:
+        for backend in compatible_cuda_backends(packages, hardware):
+            add(backend)
+    if "amd" in hardware.vendors:
+        add("rocm")
     if "intel" in hardware.vendors:
         add("sycl")
     add("vulkan")
@@ -1162,18 +1344,9 @@ def _find_executable(candidates: tuple[str, ...], label: str) -> str:
 
 
 def _find_cuda_compiler() -> Path:
-    candidates: list[Path] = []
-    nvcc = shutil.which("nvcc")
-    if nvcc:
-        candidates.append(Path(nvcc))
-    for variable in ("CUDA_HOME", "CUDA_PATH"):
-        root = os.environ.get(variable)
-        if root:
-            candidates.append(Path(root) / "bin" / "nvcc")
-    candidates.append(Path("/usr/local/cuda/bin/nvcc"))
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve()
+    compiler = _find_cuda_compiler_optional()
+    if compiler is not None:
+        return compiler
     raise RuntimeError(
         "CUDA compiler 'nvcc' was not found. Install the NVIDIA CUDA Toolkit and "
         "add its bin directory to PATH or set CUDA_HOME."
@@ -1533,7 +1706,11 @@ def _print_backends(platform_name: str, architecture: str) -> None:
     print(f"Available {label} {architecture} backends:")
     if platform_name == "linux":
         cuda_description = LINUX_CUDA_PACKAGES[architecture].description
-        print(f"  {'cuda':12} {cuda_description} [requires --build-from-source]")
+        print(f"  {'cuda':12} Auto-select a compatible CUDA archive")
+        print(
+            f"  {'cuda':12} {cuda_description} "
+            f"[with --build-from-source]"
+        )
     for backend, package in PLATFORM_PACKAGES[platform_name][architecture].items():
         print(f"  {backend:12} {package.description}")
 
@@ -1546,6 +1723,15 @@ def _print_detection(platform_name: str, hardware: HardwareInfo) -> None:
         print(f"[INFO] Detected GPU vendors: {', '.join(hardware.vendors) or 'unknown'}")
     for name in hardware.gpu_names:
         print(f"[INFO] GPU: {name}")
+    if "nvidia" in hardware.vendors:
+        print(
+            "[INFO] NVIDIA driver CUDA compatibility: "
+            f"{format_cuda_version(hardware.cuda_driver_version)}"
+        )
+        print(
+            "[INFO] CUDA Toolkit: "
+            f"{format_cuda_version(hardware.cuda_toolkit_version)}"
+        )
 
 
 def _print_dry_run(
@@ -1664,7 +1850,7 @@ def main(argv: list[str] | None = None) -> int:
             write_runtime_config(
                 context,
                 package,
-                hardware.gpu_names,
+                hardware,
                 executable,
                 library_dirs,
                 version,
