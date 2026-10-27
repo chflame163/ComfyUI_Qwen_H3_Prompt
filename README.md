@@ -1,6 +1,7 @@
 # ComfyUI Qwen H3 Prompt
 
 在 ComfyUI 内使用本地 Qwen3.8-27B 驱动 Minimax H3 官方 Skill 或自定义 Skill 生成 H3 提示词与制作方案。
+同项目还提供通用多模态节点 `QWEN General Prompt(Local)`，用图片加文字提示词完成识图与文本生成，Skill 可选。
 节点在 ComfyUI 内启动独立的本地 `llama-server`，推理过程不访问网络。运行完成后结束外部进程，释放GPU显存和系统内存（`force unload model`开启时），不占用ComfyUI内部资源。
 
 节点加载时扫描 `skills/` 和 `custom_skills/` 目录并加载 Skill。
@@ -117,7 +118,7 @@ python install_runtime.py --backend cuda --build-from-source
 
 
 ## 节点
-启动ComfyUI，在 `😺dzNodes/QWen_H3_Prompt` 分类中添加 `Qwen H3 Prompt (Local)`节点。
+启动ComfyUI，在 `😺dzNodes/QWen_H3_Prompt` 分类中添加 `Qwen H3 Prompt (Local)` 与 `QWEN General Prompt(Local)` 两个节点。
 ![image](images/QwenH3Prompt_node.jpg)  
 
 节点选项说明：
@@ -189,6 +190,49 @@ Qwen 会根据用户提示词、目标时长、参考图片以及参考视频的
 - 用户明确要求“完全静音”“全程静音”或“不要任何声音”时，强制输出 `overall_soundscape: N/A` 和 `non_diegetic_music: N/A`。
 
 这属于根据视觉内容创作新的音频描述，不是分析、复刻或保留参考视频原声。生成的文本最终交给 MiniMax H3 合成原生声音。
+
+
+## QWEN General Prompt(Local)
+![image](images/QwenGeneralPrompt_node.jpg)  
+通用多模态节点，用于“识图 + 文本生成”。它同样调用本地 `llama-server` 的 Qwen3.8-27B，但不做任何 H3 模式判定、时长注入或输出结构约束，模型回答什么就由所选 Skill 与用户提示词决定。与 `Qwen H3 Prompt (Local)` 共用同一份模型目录、Skill 目录和常驻服务（模型与投影器配置相同时可直接复用，不会重复加载）。
+
+节点选项说明：
+- `prompt`：发送给 Qwen 的请求，原样作为用户消息的第一段文本，节点不额外包装。
+- `system_prompt`：可选的常驻指令，留空时只使用输出契约。
+- `skill`：`none`、`auto`、内置 Skill 或 `custom_skills/` 中的第三方 Skill。
+  - `none`（默认）：完全不加载 Skill，仅依靠 `prompt` 与 `system_prompt`。
+  - `auto`：先用一次低温短推理在全部 Skill 中挑选，再加载所选 Skill。
+  - 直接指定 Skill id：跳过路由，直接加载该 Skill。
+- `include skill references`：默认开启，加载 Skill 的 `references/` 文本；关闭时只读 `SKILL.md`，可显著减少上下文占用。
+- `llm_model` / `vision_model`：与 H3 节点相同的 GGUF 选项。`vision_model` 额外提供 `none`，用于没有 mmproj 文件或纯文本任务；此时若连接了图片或视频会直接报错提醒。
+- `think_mode` / `reasoning_effort`：与 H3 节点一致。
+- `max_tokens`：默认 `8192`，最高 `16384`。
+- `seed`：种子。
+- `images`：动态添加 0-12 个 IMAGE 插槽，每个插槽只接受单张图片（不接受批次）。
+- `videos`：动态添加 0-3 路按时间排序的 IMAGE 批次，可接 VHS Load Video 等输出。
+- `video_fps`：视频帧批次的帧率，默认 `24.0`，用于给模型标注每帧时间戳。
+- `video_sample_frames_per_sec`：每秒抽帧数，默认 `2`；同一秒的帧合成一张时序联系图。单路抽帧总数上限 `64`，超出时报错并提示调整参数。
+- `force unload model`：与 H3 节点一致。
+
+输出端口：
+- `text`：模型最终回答。
+- `selected_skill`：本次实际使用的 Skill，未加载时为 `none`。
+
+典型用法：
+
+```text
+# 纯识图，不加载 Skill
+skill = none
+prompt = 逐条列出这张图片中的文字、人物动作和画面构图，并指出可能的穿帮。
+
+# 加载自定义 Skill 做结构化改写
+skill = my-caption-style
+prompt = 为 Picture 1 写一段适合发布的中文短视频文案。
+
+# 自动选择 Skill
+skill = auto
+prompt = 参考这两张产品图，生成一组电商详情页文案与卖点说明。
+```
 
 
 ## 显存和生命周期

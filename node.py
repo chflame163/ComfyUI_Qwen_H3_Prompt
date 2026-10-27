@@ -1,24 +1,30 @@
 from __future__ import annotations
 
-import atexit
-import gc
-import logging
-import re
-import threading
 import time
-from pathlib import Path
 
 import comfy.model_management
-import folder_paths
 from comfy_api.latest import ComfyExtension, io
 
-from .media import (
-    image_content,
-    image_grid_content,
-    sample_indices_per_second,
-    text_content,
+from .common import (
+    DEFAULT_MMPROJ,
+    DEFAULT_MODEL,
+    INFERENCE_LOCK,
+    LOGGER,
+    SERVER_MANAGER,
+    autogrow_values as _autogrow_values,
+    instruct_sampling_settings,
+    media_content,
+    model_options as _model_options,
+    release_node_resources as _release_node_resources,
+    resolve_model as _resolve_model,
+
+    success as _success,
+    failure as _failure,
+    thinking_sampling_settings,
+    usage_summary as _usage_summary,
+    validate_images,
+    video_details as _video_details,
 )
-from .runtime import LlamaServerManager
 from .skills import (
     SKILL_NAMES,
     detect_h3_mode,
@@ -29,126 +35,30 @@ from .skills import (
     router_prompt,
     system_prompt,
 )
+from .general_node import QwenGeneralPrompt
 
-MODEL_DIR = Path(folder_paths.models_dir) / "LLM" / "Qwen3.8"
-DEFAULT_MODEL = "Qwen3.8-27B-Q4_K_M.gguf"
-DEFAULT_MMPROJ = "mmproj-F16.gguf"
 REFERENCE_VIDEO_FPS = 24.0
-INFERENCE_LOCK = threading.Lock()
-SERVER_MANAGER = LlamaServerManager()
-LOGGER = logging.getLogger("ComfyUI.QwenH3Prompt")
-GREEN = "\033[92m"
-RED = "\033[91m"
-RESET = "\033[0m"
-
-atexit.register(SERVER_MANAGER.release)
-
-
-def _success(message: str) -> None:
-    LOGGER.info("%s%s%s", GREEN, message, RESET)
-
-
-def _failure(message: str) -> None:
-    LOGGER.error("%s%s%s", RED, message, RESET)
-
-
-def _usage_summary(usage: dict[str, int]) -> str:
-    prompt_tokens = usage.get("prompt_tokens")
-    completion_tokens = usage.get("completion_tokens")
-    total_tokens = usage.get("total_tokens")
-    if total_tokens is None:
-        return "token usage unavailable"
-    return (
-        f"prompt {prompt_tokens or 0}, completion {completion_tokens or 0}, "
-        f"total {total_tokens} tokens"
-    )
-
-
-def _release_node_resources() -> None:
-    SERVER_MANAGER.release()
-    gc.collect()
-    comfy.model_management.soft_empty_cache(force=True)
-
-
-def _model_options(projector: bool) -> list[str]:
-    files = sorted(path.name for path in MODEL_DIR.glob("*.gguf")) if MODEL_DIR.is_dir() else []
-    if projector:
-        options = [name for name in files if "mmproj" in name.lower()]
-        fallback = DEFAULT_MMPROJ
-    else:
-        options = [name for name in files if "mmproj" not in name.lower()]
-        fallback = DEFAULT_MODEL
-    return options or [fallback]
-
-
-def _resolve_model(name: str) -> Path:
-    root = MODEL_DIR.resolve()
-    path = (root / name).resolve()
-    if path.parent != root or not path.is_file() or path.suffix.lower() != ".gguf":
-        raise FileNotFoundError(f"Invalid or missing GGUF model in {root}: {name}")
-    return path
-
-
-def _autogrow_values(inputs) -> list:
-    if not inputs:
-        return []
-
-    def index(item):
-        match = re.search(r"(\d+)$", item[0])
-        return int(match.group(1)) if match else 0
-
-    return [value for _, value in sorted(inputs.items(), key=index) if value is not None]
+MAX_REFERENCE_IMAGES = 9
+MAX_REFERENCE_VIDEOS = 3
+MAX_REFERENCE_VIDEO_SECONDS = 15.0
 
 
 def _validate_reference_images(images: list) -> None:
-    if len(images) > 9:
-        raise ValueError(f"At most 9 reference images are supported; got {len(images)}.")
-    for image_index, image in enumerate(images, 1):
-        image_count = int(image.shape[0])
-        if image_count != 1:
-            raise ValueError(
-                f"Reference image {image_index} must contain exactly one image; got a batch of {image_count}."
-            )
+    validate_images(images, MAX_REFERENCE_IMAGES)
 
 
 def _reference_video_details(
     videos: list,
     sample_frames_per_second: int,
 ) -> list[tuple]:
-    if len(videos) > 3:
-        raise ValueError(f"At most 3 reference videos are supported; got {len(videos)}.")
-    details = []
-    total_duration = 0.0
-    for video_index, frames in enumerate(videos, 1):
-        frame_count = int(frames.shape[0])
-        if frame_count < 1:
-            raise ValueError(
-                f"Reference video {video_index} must contain at least 1 frame; got {frame_count}."
-            )
-        source_duration = frame_count / REFERENCE_VIDEO_FPS
-        if source_duration > 15.0:
-            raise ValueError(
-                f"Reference video {video_index} must be at most 15 seconds at 24 fps; "
-                f"got {source_duration:.2f}s."
-            )
-        total_duration += source_duration
-        details.append(
-            (
-                frames,
-                frame_count,
-                source_duration,
-                sample_indices_per_second(
-                    frame_count,
-                    REFERENCE_VIDEO_FPS,
-                    sample_frames_per_second,
-                ),
-            )
-        )
-    if total_duration > 15.0:
-        raise ValueError(
-            f"Reference videos may total at most 15 seconds; got {total_duration:.2f}s."
-        )
-    return details
+    return _video_details(
+        videos,
+        REFERENCE_VIDEO_FPS,
+        sample_frames_per_second,
+        max_videos=MAX_REFERENCE_VIDEOS,
+        max_video_seconds=MAX_REFERENCE_VIDEO_SECONDS,
+        max_total_seconds=MAX_REFERENCE_VIDEO_SECONDS,
+    )
 
 
 def _picture_role(mode: str, picture_index: int) -> str:
@@ -162,23 +72,7 @@ def _picture_role(mode: str, picture_index: int) -> str:
 
 
 def _sampling_settings(think_mode: bool) -> dict[str, float | int]:
-    if think_mode:
-        return {
-            "temperature": 1.0,
-            "top_p": 0.95,
-            "top_k": 20,
-            "min_p": 0.0,
-            "presence_penalty": 0.0,
-            "repetition_penalty": 1.0,
-        }
-    return {
-        "temperature": 0.7,
-        "top_p": 0.8,
-        "top_k": 20,
-        "min_p": 0.0,
-        "presence_penalty": 1.5,
-        "repetition_penalty": 1.0,
-    }
+    return thinking_sampling_settings() if think_mode else instruct_sampling_settings()
 
 
 def _user_content(
@@ -188,41 +82,15 @@ def _user_content(
     video_details: list[tuple],
     mode: str,
 ) -> tuple[list[dict[str, object]], str]:
-    content: list[dict[str, object]] = [
-        text_content(f"User request:\n{prompt}\n\nTarget duration: {duration:.2f} seconds."),
-    ]
-    assets = []
-    for picture_index, image in enumerate(images, 1):
-        role = _picture_role(mode, picture_index)
-        content.append(text_content(f"<Picture {picture_index}>: connected as {role}."))
-        content.append(image_content(image))
-        assets.append(f"Picture {picture_index}={role}")
-
-    for video_index, details in enumerate(video_details, 1):
-        frames, frame_count, source_duration, sample_groups = details
-        sampled_frame_count = sum(len(indices) for indices in sample_groups)
-        content.append(
-            text_content(
-                f"<Video {video_index}>: {frame_count} ordered frames at {REFERENCE_VIDEO_FPS:.3f} fps "
-                f"({source_duration:.2f} seconds), represented by {sampled_frame_count} sampled frames "
-                f"grouped into {len(sample_groups)} chronological one-second contact sheets."
-            )
-        )
-        for second_index, indices in enumerate(sample_groups):
-            timestamps = ", ".join(
-                f"{frame_index / REFERENCE_VIDEO_FPS:.3f}s" for frame_index in indices
-            )
-            content.append(
-                text_content(
-                    f"<Video {video_index}> second {second_index + 1}/{len(sample_groups)} contact sheet. "
-                    f"Read cells in row-major chronological order at: {timestamps}."
-                )
-            )
-            content.append(image_grid_content(frames, indices))
-        assets.append(
-            f"Video {video_index}={source_duration:.2f}s/{sampled_frame_count} sampled frames"
-        )
-    return content, ", ".join(assets) if assets else "none"
+    return media_content(
+        images,
+        video_details,
+        REFERENCE_VIDEO_FPS,
+        image_role=lambda picture_index: _picture_role(mode, picture_index),
+        include_prompt=(
+            f"User request:\n{prompt}\n\nTarget duration: {duration:.2f} seconds."
+        ),
+    )
 
 
 class QwenH3Prompt(io.ComfyNode):
@@ -632,7 +500,7 @@ class QwenH3Prompt(io.ComfyNode):
 
 class QwenH3PromptExtension(ComfyExtension):
     async def get_node_list(self):
-        return [QwenH3Prompt]
+        return [QwenH3Prompt, QwenGeneralPrompt]
 
 
 async def comfy_entrypoint() -> QwenH3PromptExtension:

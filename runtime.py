@@ -141,7 +141,7 @@ class LlamaServer:
     def __init__(
         self,
         model: Path,
-        mmproj: Path,
+        mmproj: Path | None,
         context_size: int = 32768,
         runtime_spec: RuntimeSpec | None = None,
     ):
@@ -204,8 +204,6 @@ class LlamaServer:
             str(self.executable),
             "--model",
             str(self.model),
-            "--mmproj",
-            str(self.mmproj),
             "--alias",
             "qwen3.8-27b",
             "--api-key",
@@ -226,13 +224,20 @@ class LlamaServer:
             "q8_0",
             "--cache-type-v",
             "q8_0",
-            "--image-min-tokens",
-            "1024",
-            "--image-max-tokens",
-            "1024",
             "--jinja",
             "--no-webui",
         ]
+        if self.mmproj is not None:
+            arguments.extend(
+                [
+                    "--mmproj",
+                    str(self.mmproj),
+                    "--image-min-tokens",
+                    "1024",
+                    "--image-max-tokens",
+                    "1024",
+                ]
+            )
         if self.runtime_spec.fit:
             arguments.extend(
                 [
@@ -352,12 +357,12 @@ class LlamaServerManager:
         self._key: tuple[Path, Path, int, Path, str, str] | None = None
 
     def acquire(
-        self, model: Path, mmproj: Path, context_size: int = 32768
+        self, model: Path, mmproj: Path | None, context_size: int = 32768
     ) -> tuple[LlamaServer, bool]:
         runtime_spec = load_runtime_spec()
         key = (
             model.resolve(),
-            mmproj.resolve(),
+            mmproj.resolve() if mmproj is not None else None,
             context_size,
             runtime_spec.executable.resolve(),
             runtime_spec.platform_name,

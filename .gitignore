@@ -9,3 +9,4 @@ __pycache__/
 bin/
 runtime/
 runtime_config.json
+custom_skills/

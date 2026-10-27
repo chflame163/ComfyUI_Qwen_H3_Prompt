@@ -417,15 +417,21 @@ def _skill_path(skill: str) -> Path:
     return root
 
 
-def skill_instructions(skill: str, mode: str, max_chars: int = 72000) -> str:
+def skill_instructions(
+    skill: str,
+    mode: str | None = None,
+    max_chars: int = 72000,
+    include_references: bool = True,
+) -> str:
+    """Load one Skill as prompt text. ``mode`` is only meaningful for the H3 Skills."""
     skill = _skill_spec(skill).id
     root = _skill_path(skill)
 
     parts = [f"# Selected H3 Skill: {skill}\n\n{_read(root / 'SKILL.md')}"]
-    if skill == "h3-prompt-writing":
+    if mode and skill == "h3-prompt-writing":
         guide = "ref-en.txt" if mode == "ref2va" else "base-en.txt"
         parts.append(f"# Required H3 reference: {guide}\n\n{_read(root / 'references' / guide)}")
-    else:
+    elif include_references:
         used = len(parts[0])
         for path in (
             sorted((root / "references").glob("**/*")) if (root / "references").is_dir() else ()
@@ -447,6 +453,56 @@ def skill_instructions(skill: str, mode: str, max_chars: int = 72000) -> str:
             parts.append(addition)
             used += len(addition)
     return "\n\n".join(parts)
+
+
+def skill_catalog(skills: tuple[SkillSpec, ...] | None = None) -> str:
+    available = skills if skills is not None else SKILL_REGISTRY
+    return "\n".join(f"- {spec.id}: {spec.description}" for spec in available)
+
+
+def generic_router_prompt(
+    user_prompt: str,
+    asset_summary: str,
+    skills: tuple[SkillSpec, ...] | None = None,
+) -> list[dict[str, str]]:
+    """Ask the model to pick one Skill for an open-ended multimodal request."""
+    system = (
+        "Select exactly one available Skill for the request. Return only its exact Skill id, with no "
+        "punctuation or explanation. Choose the Skill whose instructions best match the requested task; "
+        "when nothing clearly applies, choose the most general-purpose Skill.\n\n"
+        + skill_catalog(skills)
+    )
+    user = f"Connected assets: {asset_summary}\nRequest:\n{user_prompt}"
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def generic_system_prompt(
+    skill: str | None,
+    extra_instructions: str = "",
+    *,
+    include_references: bool = True,
+) -> str:
+    """Build the system message with or without a Skill attached."""
+    parts = []
+    if skill:
+        parts.append(skill_instructions(skill, include_references=include_references))
+    if extra_instructions.strip():
+        parts.append(extra_instructions.strip())
+    parts.append(GENERIC_LOCAL_CONTRACT)
+    return "\n\n".join(parts)
+
+
+GENERIC_LOCAL_CONTRACT = """
+# Binding local ComfyUI output contract
+
+This node performs one local inference pass with a Qwen model running in llama.cpp. Connected pictures are
+supplied to the model as visual input, and the answer is returned to the ComfyUI graph as plain text without
+post-processing.
+
+Answer the user's request directly. Follow the selected Skill's instructions when one is attached. Do not invent
+tools, files, network access, or external generation steps, and do not add a wrapper or explanation that the
+request did not ask for.
+""".strip()
 
 
 def system_prompt(skill: str, mode: str, duration: float) -> str:
