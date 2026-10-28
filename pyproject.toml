@@ -1,6 +1,6 @@
 [project]
 name = "qwen-h3-prompt"
-version = "0.1.6"
+version = "0.1.7"
 description = "Generate MiniMax H3 prompts and general multimodal Qwen answers locally in ComfyUI."
 license = { file = "LICENSE" }
 requires-python = ">=3.9"

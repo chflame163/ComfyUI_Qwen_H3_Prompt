@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 import socket
@@ -17,11 +18,22 @@ from pathlib import Path
 NODE_ROOT = Path(__file__).resolve().parent
 RUNTIME_CONFIG_PATH = NODE_ROOT / "runtime_config.json"
 LLAMA_SEED_MODULUS = 0xFFFFFFFF
+LOGGER = logging.getLogger("ComfyUI.QwenH3Prompt.Runtime")
 
 
 def normalize_llama_seed(seed: int) -> int:
     """Map ComfyUI's uint64 seed to llama.cpp's deterministic uint32 range."""
     return int(seed) % LLAMA_SEED_MODULUS
+
+
+def _reasoning_tokens(usage: object) -> object:
+    """Return the reasoning-token count reported by llama.cpp, when it reports one."""
+    if not isinstance(usage, dict):
+        return None
+    details = usage.get("completion_tokens_details")
+    if isinstance(details, dict):
+        return details.get("reasoning_tokens")
+    return usage.get("reasoning_tokens")
 
 
 @dataclass(frozen=True)
@@ -339,13 +351,50 @@ class LlamaServer:
         }
         if think_mode:
             payload["reasoning_effort"] = reasoning_effort
-        response = self._request("POST", "/v1/chat/completions", payload)
-        content = response["choices"][0]["message"].get("content") or ""
-        if not content.strip():
-            raise RuntimeError(
-                "Qwen returned no final answer. Disable think mode or increase max_tokens so thinking does not consume the output budget."
+        else:
+            payload["reasoning_effort"] = "none"
+        try:
+            response = self._request("POST", "/v1/chat/completions", payload)
+        except RuntimeError as error:
+            if not self._is_unsupported_reasoning_effort(error):
+                raise
+            LOGGER.warning(
+                "[Qwen H3] llama.cpp rejected reasoning_effort=%s; retrying without it",
+                payload["reasoning_effort"],
             )
-        return content.strip(), response.get("usage", {})
+            payload.pop("reasoning_effort", None)
+            response = self._request("POST", "/v1/chat/completions", payload)
+        choice = (response.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        content = (message.get("content") or "").strip()
+        usage = response.get("usage", {})
+        if content:
+            return content, usage
+        reasoning = (message.get("reasoning_content") or "").strip()
+        details = ", ".join(
+            [
+                f"finish_reason={choice.get('finish_reason') or 'unknown'}",
+                f"completion_tokens={usage.get('completion_tokens') if isinstance(usage, dict) else None}",
+                f"reasoning_tokens={_reasoning_tokens(usage)}",
+                f"max_tokens={max_tokens}",
+            ]
+        )
+        if reasoning:
+            LOGGER.warning(
+                "[Qwen H3] Empty final answer; falling back to reasoning text | think_mode=%s | %s",
+                think_mode,
+                details,
+            )
+            return reasoning, usage
+        raise RuntimeError(
+            "Qwen returned no final answer. Disable think mode or increase max_tokens so thinking "
+            f"does not consume the output budget. ({details})"
+        )
+
+    @staticmethod
+    def _is_unsupported_reasoning_effort(error: RuntimeError) -> bool:
+        detail = str(error)
+        return "HTTP 400" in detail and "reasoning_effort" in detail
 
 
 class LlamaServerManager:

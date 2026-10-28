@@ -13,6 +13,7 @@ from .common import (
     LOGGER,
     NO_VISION_MODEL,
     SERVER_MANAGER,
+    ROUTING_MAX_TOKENS,
     autogrow_values,
     failure,
     instruct_sampling_settings,
@@ -313,7 +314,7 @@ class QwenGeneralPrompt(io.ComfyNode):
                     selection, routing_usage = server.chat(
                         generic_router_prompt(prompt, asset_summary),
                         seed=seed,
-                        max_tokens=48,
+                        max_tokens=ROUTING_MAX_TOKENS,
                         think_mode=False,
                         reasoning_effort="low",
                         **routing_sampling_settings(),

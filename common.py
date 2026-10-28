@@ -24,6 +24,7 @@ DEFAULT_MODEL = "Qwen3.8-27B-Q4_K_M.gguf"
 DEFAULT_MMPROJ = "mmproj-F16.gguf"
 NO_VISION_MODEL = "none"
 CONTEXT_SIZE = 32768
+ROUTING_MAX_TOKENS = 64
 INFERENCE_LOCK = threading.Lock()
 SERVER_MANAGER = LlamaServerManager()
 LOGGER = logging.getLogger("ComfyUI.QwenH3Prompt")

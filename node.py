@@ -11,13 +11,13 @@ from .common import (
     INFERENCE_LOCK,
     LOGGER,
     SERVER_MANAGER,
+    ROUTING_MAX_TOKENS,
     autogrow_values as _autogrow_values,
     instruct_sampling_settings,
     media_content,
     model_options as _model_options,
     release_node_resources as _release_node_resources,
     resolve_model as _resolve_model,
-
     success as _success,
     failure as _failure,
     thinking_sampling_settings,
@@ -312,7 +312,7 @@ class QwenH3Prompt(io.ComfyNode):
                     mode_selection, mode_usage = server.chat(
                         mode_router_prompt(prompt, len(images)),
                         seed=seed,
-                        max_tokens=16,
+                        max_tokens=ROUTING_MAX_TOKENS,
                         temperature=0.0,
                         top_p=1.0,
                         top_k=1,
@@ -357,7 +357,7 @@ class QwenH3Prompt(io.ComfyNode):
                     selection, routing_usage = server.chat(
                         router_prompt(prompt, mode, asset_summary),
                         seed=seed,
-                        max_tokens=48,
+                        max_tokens=ROUTING_MAX_TOKENS,
                         temperature=0.0,
                         top_p=1.0,
                         top_k=1,
