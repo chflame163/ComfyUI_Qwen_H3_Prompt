@@ -26,7 +26,7 @@ from .common import (
     video_details as _video_details,
 )
 from .skills import (
-    SKILL_NAMES,
+    get_skill_names,
     detect_h3_mode,
     mode_router_prompt,
     output_issues,
@@ -112,7 +112,7 @@ class QwenH3Prompt(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "skill",
-                    options=["auto", *SKILL_NAMES],
+                    options=["auto", *get_skill_names()],
                     default="auto",
                     tooltip="Auto routes across bundled and custom Skills, or choose one directly.",
                 ),

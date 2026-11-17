@@ -29,7 +29,7 @@ from .common import (
     video_details,
 )
 from .skills import (
-    SKILL_NAMES,
+    get_skill_names,
     generic_router_prompt,
     generic_system_prompt,
     parse_skill_selection,
@@ -44,7 +44,8 @@ AUTO_SKILL = "auto"
 
 
 def _skill_options() -> list[str]:
-    return [NO_SKILL, AUTO_SKILL, *SKILL_NAMES] if SKILL_NAMES else [NO_SKILL, AUTO_SKILL]
+    names = get_skill_names()
+    return [NO_SKILL, AUTO_SKILL, *names] if names else [NO_SKILL, AUTO_SKILL]
 
 
 def _sampling_settings(think_mode: bool) -> dict[str, float | int]:
@@ -304,7 +305,7 @@ class QwenGeneralPrompt(io.ComfyNode):
 
                 selected = skill
                 if skill == AUTO_SKILL:
-                    if not SKILL_NAMES:
+                    if not get_skill_names():
                         raise RuntimeError(
                             "No Skill was discovered, so auto routing is unavailable. Add a SKILL.md under "
                             "skills/ or custom_skills/, or set skill to none."

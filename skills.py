@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -233,16 +234,61 @@ def discover_skill_registry(
         registry.append(spec)
     return tuple(registry)
 
+def _roots_signature() -> tuple:
+    """Cheap fingerprint of both Skill roots: dir names plus SKILL.md stamps."""
+    fingerprint: list[tuple] = []
+    for root in (SKILL_ROOT, CUSTOM_SKILL_ROOT):
+        if not root.is_dir():
+            fingerprint.append((str(root), None, None))
+            continue
+        fingerprint.append((str(root), root.stat().st_mtime_ns, None))
+        for candidate in sorted(root.iterdir(), key=lambda item: item.name.casefold()):
+            if not candidate.is_dir():
+                continue
+            skill_file = candidate / "SKILL.md"
+            try:
+                stamp = skill_file.stat().st_mtime_ns
+            except OSError:
+                stamp = None
+            fingerprint.append((str(root), candidate.name, stamp))
+    return tuple(fingerprint)
 
-SKILL_REGISTRY = discover_skill_registry()
-SKILL_NAMES = tuple(spec.id for spec in SKILL_REGISTRY)
-SKILL_DESCRIPTIONS = {spec.id: spec.description for spec in SKILL_REGISTRY}
-SKILL_BY_ID = {spec.id.casefold(): spec for spec in SKILL_REGISTRY}
-DEFAULT_SKILL_ID = (
-    "h3-prompt-writing"
-    if "h3-prompt-writing" in SKILL_NAMES
-    else (SKILL_NAMES[0] if SKILL_NAMES else "")
-)
+
+_SKILL_LOCK = threading.Lock()
+_SKILL_CACHE: dict = {"signature": None, "registry": ()}
+
+
+def get_skill_registry() -> tuple[SkillSpec, ...]:
+    """Return the discovered Skills, rescanning when the Skill directories change.
+
+    The registry is cached so ComfyUI refreshes pick up added, removed, or
+    edited Skills without restarting the ComfyUI process.
+    """
+    signature = _roots_signature()
+    with _SKILL_LOCK:
+        if signature != _SKILL_CACHE["signature"]:
+            _SKILL_CACHE["registry"] = discover_skill_registry()
+            _SKILL_CACHE["signature"] = signature
+        return _SKILL_CACHE["registry"]
+
+
+def get_skill_names() -> tuple[str, ...]:
+    return tuple(spec.id for spec in get_skill_registry())
+
+
+def get_skill_descriptions() -> dict[str, str]:
+    return {spec.id: spec.description for spec in get_skill_registry()}
+
+
+def get_skill_by_id() -> dict[str, SkillSpec]:
+    return {spec.id.casefold(): spec for spec in get_skill_registry()}
+
+
+def get_default_skill_id() -> str:
+    names = get_skill_names()
+    if "h3-prompt-writing" in names:
+        return "h3-prompt-writing"
+    return names[0] if names else ""
 
 BASE_FIELDS = (
     "integrated_multimodal_description:",
@@ -347,7 +393,7 @@ def router_prompt(
     asset_summary: str,
     skills: tuple[SkillSpec, ...] | None = None,
 ) -> list[dict[str, str]]:
-    available = skills if skills is not None else SKILL_REGISTRY
+    available = skills if skills is not None else get_skill_registry()
     catalog = "\n".join(f"- {spec.id}: {spec.description}" for spec in available)
     system = (
         "Select exactly one available H3 skill for the request. Return only its exact skill id, "
@@ -362,7 +408,7 @@ def parse_skill_selection(
     text: str,
     skills: tuple[SkillSpec, ...] | None = None,
 ) -> str:
-    available = skills if skills is not None else SKILL_REGISTRY
+    available = skills if skills is not None else get_skill_registry()
     by_id = {spec.id.casefold(): spec.id for spec in available}
     normalized = text.strip().lower()
     if normalized in by_id:
@@ -386,7 +432,7 @@ def parse_skill_selection(
         ]
     if len(matches) == 1:
         return matches[0]
-    fallback = next((spec.id for spec in available if spec.id == DEFAULT_SKILL_ID), None)
+    fallback = next((spec.id for spec in available if spec.id == get_default_skill_id()), None)
     return fallback or (available[0].id if available else "")
 
 
@@ -395,7 +441,7 @@ def _read(path: Path) -> str:
 
 
 def _skill_spec(skill: str) -> SkillSpec:
-    spec = SKILL_BY_ID.get(skill.casefold())
+    spec = get_skill_by_id().get(skill.casefold())
     if spec is None:
         raise ValueError(f"Unknown skill: {skill}")
     return spec
@@ -456,7 +502,7 @@ def skill_instructions(
 
 
 def skill_catalog(skills: tuple[SkillSpec, ...] | None = None) -> str:
-    available = skills if skills is not None else SKILL_REGISTRY
+    available = skills if skills is not None else get_skill_registry()
     return "\n".join(f"- {spec.id}: {spec.description}" for spec in available)
 
 
