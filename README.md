@@ -32,7 +32,7 @@ git clone https://github.com/chflame163/ComfyUI_Qwen_H3_Prompt.git
 
 ## 安装llama-server runtime
 
-项目只提供一个跨平台安装入口 `install_runtime.py`。它仅使用 Python 标准库，自动识别 Windows、Linux 或 macOS、x64/ARM64 架构及显卡，并为当前机器部署固定的 llama.cpp `b11115` runtime，不需要安装额外的 pip 包。NVIDIA 设备优先使用 `nvidia-smi` 报告的驱动 CUDA 兼容版本，`nvcc` 版本仅作为备用判断。
+项目只提供一个跨平台安装入口 `install_runtime.py`。它仅使用 Python 标准库，自动识别 Windows、Linux 或 macOS、x64/ARM64 架构及显卡，并为当前机器部署固定的 llama.cpp `b12464` runtime，不需要安装额外的 pip 包。NVIDIA 设备优先使用 `nvidia-smi` 报告的驱动 CUDA 兼容版本，`nvcc` 版本仅作为备用判断。CUDA 归档按 NVIDIA 的同 major 小版本兼容规则匹配：驱动只要报告同一 major（例如 13.4）就可以使用官方为该 major 更高小版本（13.5）构建的归档，因为归档自带 CUDA runtime；跨 major 仍要求驱动不低于归档版本。实际命中的规则会写入 `runtime_config.json` 的 `cuda_selection` 字段。
 
 Windows ComfyUI 官方便携包在节点目录中执行：
 
@@ -66,7 +66,7 @@ python install_runtime.py --backend vulkan
 # 强制重新安装
 python install_runtime.py --force
 
-# 只使用 runtime/.downloads/b11115 中已经校验的文件
+# 只使用 runtime/.downloads/b12464 中已经校验的文件
 python install_runtime.py --offline
 ```
 
@@ -75,17 +75,17 @@ python install_runtime.py --offline
 
 | 系统和设备 | 自动顺序 |
 | --- | --- |
-| Windows x64 NVIDIA | 兼容 CUDA 13.4 时：CUDA 13.4 → CUDA 12.4 → Vulkan → CPU；否则从 CUDA 12.4 开始 |
+| Windows x64 NVIDIA | 驱动兼容 CUDA 13 时：CUDA 13.5 → CUDA 12.4 → Vulkan → CPU；否则从 CUDA 12.4 开始 |
 | Windows x64 AMD | ROCm 10.0 → Vulkan → CPU |
 | Windows x64 Intel | SYCL → Vulkan → CPU |
 | Windows x64 未识别 GPU | Vulkan → CPU |
-| Windows ARM64 NVIDIA | 兼容 CUDA 13.4 时：CUDA 13.4 → CPU；否则 CPU |
+| Windows ARM64 NVIDIA | 驱动兼容 CUDA 13 时：CUDA 13.5 → CPU；否则 CPU |
 | Windows ARM64 Qualcomm Adreno | OpenCL → CPU |
-| Linux x64 NVIDIA | 兼容 CUDA 13.4 时：CUDA 13.4 → CUDA 12.8 → Vulkan → CPU；否则从兼容版本开始 |
+| Linux x64 NVIDIA | 驱动兼容 CUDA 13 时：CUDA 13.5 → CUDA 12.8 → Vulkan → CPU；否则从兼容版本开始 |
 | Linux x64 AMD | ROCm 10.0 → Vulkan → CPU |
 | Linux x64 Intel | SYCL FP16 → Vulkan → CPU |
 | Linux x64 未识别 GPU | Vulkan → CPU |
-| Linux ARM64 NVIDIA | 兼容 CUDA 13.4 时：CUDA 13.4 → Vulkan → CPU；否则 Vulkan → CPU |
+| Linux ARM64 NVIDIA | 驱动兼容 CUDA 13 时：CUDA 13.5 → Vulkan → CPU；否则 Vulkan → CPU |
 | Linux ARM64 其他设备 | Vulkan → CPU |
 | macOS Apple Silicon 或 Intel | Metal → CPU |
 
@@ -97,7 +97,7 @@ macOS 使用对应架构的官方包。Metal 不需要额外 GPU 计算框架，
 
 ### Linux CUDA 部署
 
-官方 `b11115` 提供 Ubuntu x64 CUDA 12.8/13.4 和 Ubuntu ARM64 CUDA 13.4 压缩包，自动模式会根据本机驱动兼容版本选择。也可显式要求自动选择 CUDA 预编译包：
+官方 `b12464` 提供 Ubuntu x64 CUDA 12.8/13.5 和 Ubuntu ARM64 CUDA 13.5 压缩包，自动模式会根据本机驱动兼容版本选择。也可显式要求自动选择 CUDA 预编译包：
 
 ```
 python install_runtime.py --backend cuda
@@ -115,6 +115,32 @@ python install_runtime.py --backend cuda --build-from-source
 - 包含 `nvcc` 的 NVIDIA CUDA Toolkit，`nvcc` 位于 `PATH` 中或已经设置 `CUDA_HOME`；
 - Git、CMake、C 编译器和 C++ 编译器，例如 Ubuntu/Debian 的 `git cmake build-essential`。
 
+### 升级 llama.cpp 引擎（b11115 → b12464）
+
+本项目的固定引擎已从 `b11115`（2026-09-22）升级到 `b12464`（2026-11-17），对应完整 commit `d3c3e242c16b8cbf51400fad410cd69b22d64f35`，跨越 1349 个提交。三个平台的预编译资产名称与 SHA256 已在安装器内全部更新，Windows 与 macOS 用户同样只需重新执行安装器。
+
+本次升级中与本节点相关的改进：
+
+- Qwen3.8 的 MTP 草稿模型现在能接收视觉 embedding（`#30397`、`#30257`），带 `mmproj` 且使用 MTP 量化时此前会被忽略；
+- Qwen-VL 图像预处理对齐 HuggingFace transformers（`#30736`、`#32130`），并修正 qwen3vl 输出头维度与 qwen2vl FFN 权重缩放（`#32349`、`#32241`），识图结果精度提升；
+- CUDA 后端 prefill 与解码提速：CUDA graph 分块摊薄启动开销（`#30804`）、MMQ 内融合 FFN gate/up 与 GLU（`#29948`、`#31188`）、Qwen MRoPE 与 set-rows 融合（`#31025`）、显存池预留减半并在保留失败时重试（`#30542`）；
+- 服务端明确支持 chat 模板的 reasoning effort 档位查询（`#31271`），并对模板不接受的档位返回 400（`#32332`），节点的 `reasoning_effort` 回退逻辑据此继续成立；
+- 流式响应后的连接复用修复（`#30492`）与 sleep/resume 时重复累加 mmproj 显存余量的修复（`#28233`），对应本节点反复请求短生命周期本地 server、并在结束后释放显存的行为。
+
+已经安装过旧引擎的机器不需要卸载，直接重跑一次安装命令即可：安装器会下载 `b12464` 归档、校验、解压，并把 `runtime_config.json` 指向新的可执行文件。之后**必须重启 ComfyUI**——节点只在拉起 llama-server 子进程的那一刻读取 `runtime_config.json`，升级前已经在跑的 ComfyUI 会继续复用旧进程。
+
+重启后节点日志会直接标出引擎版本，无需再去翻 runtime 目录：
+
+```
+[Qwen H3] Model loading complete | new model loaded | platform=linux | backend=cuda13 | llama.cpp=b12464 | port=57155 | elapsed 9.86 s
+```
+
+旧版本目录（例如 `runtime/linux-x64/cuda13/b11115`）不会被使用，但仍占用磁盘并作为降级候选保留，单个构建约 0.8–1.1 GB。不需要降级余量时可以删掉，`runtime/.downloads/` 下同名 tag 的归档缓存同理，删除后只是下次需要时重新下载。
+
+`b12464` 的 CUDA 13 归档由 13.4 构建变为 13.5 构建，因此安装器引入同 major 小版本兼容匹配：驱动报 13.4 也能使用 13.5 归档，`runtime_config.json` 的 `cuda_selection.match` 会记为 `same_major`。这一规则已在 Linux x64 真机验证（驱动 `615.71.09` 报 CUDA UMD 13.4，安装并通过了 `llama-server --version` 与 `--list-devices` 校验）；Windows 与 macOS 的资产名、哈希和归档结构已逐项核对，但缺少对应硬件，实际运行表现尚未在真机验证。
+
+GitHub 到国内机器的连接偶发中断，表现为 `Download failed ... SSL: UNEXPECTED_EOF_WHILE_READING`。此时安装器会自动尝试下一个候选后端（Linux x64 会退到 CUDA 12.8），所以最终装上的可能不是最优包。看到该报错后重跑 `python install_runtime.py --backend cuda` 即可；反复失败时使用 `--offline` 复用 `runtime/.downloads/` 中已校验的归档。
+
 
 
 ## 节点
@@ -123,7 +149,7 @@ python install_runtime.py --backend cuda --build-from-source
 
 节点选项说明：
 - `skill`：`auto`、内置 Skill 或 `custom_skills/` 中配置的第三方 Skill。设为auto时会在全部 Skill 中自动选择。
-- `duration`：目标 H3 视频时长，默认 `10.0` 秒，取值范围4~15秒。
+- `duration`：目标 H3 视频时长，默认 `10.0` 秒，取值范围 1~60 秒。
 - `think_mode`：布尔开关，默认关闭；自动在 Qwen 官方 instruct 和 thinking 推荐参数之间切换。
 - `reasoning_effort`：仅在 `think_mode` 开启时生效，默认 `medium`。
 - `seed`：种子。
@@ -194,7 +220,7 @@ Qwen 会根据用户提示词、目标时长、参考图片以及参考视频的
 
 ## QWEN General Prompt(Local)
 ![image](images/QwenGeneralPrompt_node.jpg)  
-通用多模态节点，用于“识图 + 文本生成”。它同样调用本地 `llama-server` 的 Qwen3.8-27B，但不做任何 H3 模式判定、时长注入或输出结构约束，模型回答什么就由所选 Skill 与用户提示词决定。与 `Qwen H3 Prompt (Local)` 共用同一份模型目录、Skill 目录和常驻服务（模型与投影器配置相同时可直接复用，不会重复加载）。
+通用多模态节点，用于“识图 + 文本生成”。它同样调用本地 `llama-server` 的 Qwen3.8-27B，但不做任何 H3 模式判定、图片首尾帧角色标注或输出结构约束，模型回答什么就由所选 Skill 与用户提示词决定。与 `Qwen H3 Prompt (Local)` 共用同一份模型目录、Skill 目录和常驻服务（模型与投影器配置相同时可直接复用，不会重复加载）。
 
 节点选项说明：
 - `prompt`：发送给 Qwen 的请求，原样作为用户消息的第一段文本，节点不额外包装。
@@ -242,6 +268,6 @@ prompt = 参考这两张产品图，生成一组电商详情页文案与卖点�
 ## 上游来源与许可证
 
 - MiniMax H3 Skill 来自 [`MiniMax-AI/MiniMax-H3`](https://github.com/MiniMax-AI/MiniMax-H3) commit `d21241f0a4b3acbb34c97dae47fa417b7065e438`，官方文件保存在 `skills/`。
-- 跨平台runtime安装器固定使用 llama.cpp `b11115`，对应完整 commit `d5f66492e661b63e6c74822c2b72f5146053994e`，并对下载文件执行 SHA256 校验。
+- 跨平台runtime安装器固定使用 llama.cpp `b12464`，对应完整 commit `d3c3e242c16b8cbf51400fad410cd69b22d64f35`，并对下载文件执行 SHA256 校验。
 - Linux CUDA 源码构建使用同一固定 tag 和 commit。llama.cpp 的 MIT 许可证保存在 `third_party/llama.cpp-LICENSE`。
 - 本项目仅为学习研究使用，如果作为商业用途，请查阅相关原项目授权协议。

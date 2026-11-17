@@ -46,6 +46,9 @@ class RuntimeSpec:
     fit: bool
     fit_target_mib: int
     flash_attention: str
+    # Recorded so the node can name the engine build in its logs; the llama-server
+    # banner itself goes to a temporary log that is deleted when the server stops.
+    llama_cpp_tag: str = "unknown"
 
 
 def _configured_path(root: Path, value: object, label: str) -> Path:
@@ -123,6 +126,7 @@ def load_runtime_spec(
             fit=bool(options.get("fit", True)),
             fit_target_mib=int(options.get("fit_target_mib", 1536)),
             flash_attention=str(options.get("flash_attention", "auto")),
+            llama_cpp_tag=str(config.get("llama_cpp_tag", "unknown")),
         )
 
     raise RuntimeError(

@@ -295,10 +295,11 @@ class QwenH3Prompt(io.ComfyNode):
                 )
                 server, loaded_new = SERVER_MANAGER.acquire(model, projector)
                 LOGGER.info(
-                    "[Qwen H3] Model loading complete | %s | platform=%s | backend=%s | port=%d | elapsed %.2f s",
+                    "[Qwen H3] Model loading complete | %s | platform=%s | backend=%s | llama.cpp=%s | port=%d | elapsed %.2f s",
                     "new model loaded" if loaded_new else "resident model reused",
                     server.runtime_spec.platform_name,
                     server.backend,
+                    server.runtime_spec.llama_cpp_tag,
                     server.port,
                     time.perf_counter() - stage_started,
                 )
